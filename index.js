@@ -1,14 +1,17 @@
-const {
+import {
   Client,
   GatewayIntentBits,
-  PermissionsBitField,
-  ChannelType,
+  EmbedBuilder,
   ActionRowBuilder,
-  StringSelectMenuBuilder,
   ButtonBuilder,
   ButtonStyle,
-  EmbedBuilder
-} = require("discord.js");
+  PermissionsBitField,
+  ChannelType,
+  Events,
+  StringSelectMenuBuilder,
+  StringSelectMenuOptionBuilder,
+  MessageFlags
+} from "discord.js";
 
 const client = new Client({
   intents: [
@@ -20,54 +23,109 @@ const client = new Client({
 
 
 
-// ================= CONFIG =================
+// ================= IDS =================
 
-const VERIFY_CHANNEL_ID = "1506684679473070292";
+// blade-gate
+const VERIFY_CHANNEL_ID = "1506779053342855249";
 
-const VERIFIED_ROLE_NAME = "⚔️ Blade Seeker";
+// open-ticket
+const OPEN_TICKET_CHANNEL_ID = "1506778989736493106";
 
-const TICKET_CATEGORY_ID = "1506700800263459008";
+// SUPPORT kategori ID
+const SUPPORT_CATEGORY_ID = "1506778963392069734";
+
+
+
+// ================= ROLES =================
+
+const VERIFY_ROLE_NAME = "⚔️ Blade Seeker";
 
 const STAFF_ROLES = [
   "👁️ Community Manager",
   "Eternal Founder"
 ];
 
-// ==========================================
 
 
+// ================= READY =================
 
-client.once("ready", async () => {
+client.once(Events.ClientReady, async () => {
   console.log(`${client.user.tag} online!`);
 
-  // VERIFY MESSAGE
   try {
-    const verifyChannel = await client.channels.fetch(VERIFY_CHANNEL_ID);
 
-    const verifyEmbed = new EmbedBuilder()
-      .setColor("Red")
-      .setTitle("⚔️ Eternal Blades Verification")
-      .setDescription(
-        "Click the button below to access the server."
-      );
+    // VERIFY PANEL
 
-    const verifyButton = new ButtonBuilder()
-      .setCustomId("verify_button")
-      .setLabel("Verify")
-      .setStyle(ButtonStyle.Danger);
-
-    const verifyRow = new ActionRowBuilder().addComponents(
-      verifyButton
+    const verifyChannel = await client.channels.fetch(
+      VERIFY_CHANNEL_ID
     );
 
     await verifyChannel.send({
-      embeds: [verifyEmbed],
-      components: [verifyRow]
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("⚔️ Eternal Blades Verification")
+          .setDescription(
+            "Press the button below to verify and access the server."
+          )
+          .setColor("#ff0000")
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("verify")
+            .setLabel("VERIFY")
+            .setStyle(ButtonStyle.Success)
+        )
+      ]
     });
 
-    console.log("Verify message sent.");
+
+
+    // TICKET PANEL
+
+    const ticketChannel = await client.channels.fetch(
+      OPEN_TICKET_CHANNEL_ID
+    );
+
+    await ticketChannel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🎫 Open a Ticket")
+          .setDescription(
+            "Select a ticket category below."
+          )
+          .setColor("#ff0000")
+      ],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new StringSelectMenuBuilder()
+            .setCustomId("ticket_select")
+            .setPlaceholder("▼ Select Menu")
+            .addOptions(
+              new StringSelectMenuOptionBuilder()
+                .setLabel("Support")
+                .setValue("support"),
+
+              new StringSelectMenuOptionBuilder()
+                .setLabel("Collab")
+                .setValue("collab"),
+
+              new StringSelectMenuOptionBuilder()
+                .setLabel("Report")
+                .setValue("report"),
+
+              new StringSelectMenuOptionBuilder()
+                .setLabel("WL Help")
+                .setValue("wlhelp")
+            )
+        )
+      ]
+    });
+
+    console.log("Panels sent.");
+
   } catch (err) {
-    console.log("Verify message error:", err);
+    console.log(err);
   }
 });
 
@@ -75,56 +133,79 @@ client.once("ready", async () => {
 
 // ================= INTERACTIONS =================
 
-client.on("interactionCreate", async (interaction) => {
+client.on(Events.InteractionCreate, async (interaction) => {
 
-  // VERIFY BUTTON
-  if (interaction.isButton()) {
+  try {
 
-    if (interaction.customId === "verify_button") {
+    // VERIFY
+
+    if (
+      interaction.isButton() &&
+      interaction.customId === "verify"
+    ) {
 
       const role = interaction.guild.roles.cache.find(
-        r => r.name === VERIFIED_ROLE_NAME
+        r => r.name === VERIFY_ROLE_NAME
       );
 
       if (!role) {
+
         return interaction.reply({
           content: "❌ Verify role not found.",
-          ephemeral: true
+          flags: MessageFlags.Ephemeral
         });
       }
 
       await interaction.member.roles.add(role);
 
       return interaction.reply({
-        content: "✅ You are verified.",
-        ephemeral: true
+        content: "⚔️ Verification successful.",
+        flags: MessageFlags.Ephemeral
       });
     }
 
 
 
-    // CLOSE TICKET
-    if (interaction.customId === "close_ticket") {
+    // TICKET CREATE
 
-      await interaction.reply({
-        content: "🗑️ Ticket closing...",
-        ephemeral: true
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === "ticket_select"
+    ) {
+
+      await interaction.deferReply({
+        flags: MessageFlags.Ephemeral
       });
 
-      setTimeout(async () => {
-        await interaction.channel.delete();
-      }, 2000);
-    }
-  }
+      const type = interaction.values[0];
+
+      const safeUsername = interaction.user.username
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, "");
 
 
 
-  // TICKET SELECT MENU
-  if (interaction.isStringSelectMenu()) {
 
-    if (interaction.customId === "ticket_select") {
+      // EXISTING TICKET CHECK
 
-      const selected = interaction.values[0];
+      const existing =
+        interaction.guild.channels.cache.find(
+          c =>
+            c.name === `${type}-${safeUsername}`
+        );
+
+      if (existing) {
+
+        return interaction.editReply({
+          content:
+            "❌ You already have an open ticket."
+        });
+      }
+
+
+
+
+      // PERMISSIONS
 
       const overwrites = [
 
@@ -157,14 +238,18 @@ client.on("interactionCreate", async (interaction) => {
       ];
 
 
-      // STAFF ROLES
-      STAFF_ROLES.forEach(roleName => {
 
-        const role = interaction.guild.roles.cache.find(
-          r => r.name === roleName
-        );
+      // STAFF ACCESS
+
+      for (const roleName of STAFF_ROLES) {
+
+        const role =
+          interaction.guild.roles.cache.find(
+            r => r.name === roleName
+          );
 
         if (role) {
+
           overwrites.push({
             id: role.id,
             allow: [
@@ -174,107 +259,116 @@ client.on("interactionCreate", async (interaction) => {
             ]
           });
         }
-      });
+      }
+
 
 
 
       // CREATE CHANNEL
-      const channel = await interaction.guild.channels.create({
-        name: `${selected}-${interaction.user.username}`,
-        type: ChannelType.GuildText,
-        parent: TICKET_CATEGORY_ID,
-        permissionOverwrites: overwrites
-      });
+
+      const ticket =
+        await interaction.guild.channels.create({
+
+          name: `${type}-${safeUsername}`,
+
+          type: ChannelType.GuildText,
+
+          parent: SUPPORT_CATEGORY_ID,
+
+          permissionOverwrites: overwrites
+        });
+
 
 
 
       // CLOSE BUTTON
-      const closeButton = new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("Close Ticket")
-        .setStyle(ButtonStyle.Danger);
 
-      const closeRow = new ActionRowBuilder().addComponents(
-        closeButton
-      );
+      const closeButton =
+        new ButtonBuilder()
+          .setCustomId("close_ticket")
+          .setLabel("CLOSE")
+          .setStyle(ButtonStyle.Danger);
 
 
 
-      const ticketEmbed = new EmbedBuilder()
-        .setColor("Red")
-        .setTitle("🎫 Ticket Opened")
-        .setDescription(
-          `Welcome ${interaction.user}\n\nStaff will assist you shortly.`
-        );
 
+      // TICKET MESSAGE
 
+      await ticket.send({
 
-      await channel.send({
-        embeds: [ticketEmbed],
-        components: [closeRow]
+        content: `${interaction.user}`,
+
+        embeds: [
+
+          new EmbedBuilder()
+            .setTitle(
+              `🎫 ${type.toUpperCase()} Ticket`
+            )
+            .setDescription(
+              "Please explain your issue.\nStaff will assist you shortly."
+            )
+            .setColor("#ff0000")
+        ],
+
+        components: [
+
+          new ActionRowBuilder().addComponents(
+            closeButton
+          )
+        ]
       });
 
 
 
-      return interaction.reply({
-        content: `✅ Ticket created: ${channel}`,
-        ephemeral: true
+
+      return interaction.editReply({
+        content:
+          `✅ Ticket created: ${ticket}`
       });
     }
-  }
-});
 
 
 
-// ================= SEND TICKET PANEL =================
 
-client.on("messageCreate", async (message) => {
+    // CLOSE TICKET
 
-  if (message.content === "!ticketpanel") {
+    if (
+      interaction.isButton() &&
+      interaction.customId === "close_ticket"
+    ) {
 
-    const embed = new EmbedBuilder()
-      .setColor("Red")
-      .setTitle("🎫 Open a Ticket")
-      .setDescription(
-        "Select a ticket category below."
-      );
+      await interaction.reply({
+        content: "🗑️ Closing ticket...",
+        flags: MessageFlags.Ephemeral
+      });
 
+      setTimeout(async () => {
 
+        await interaction.channel.delete();
 
-    const menu = new StringSelectMenuBuilder()
-      .setCustomId("ticket_select")
-      .setPlaceholder("▼ Select Menu")
-      .addOptions([
-        {
-          label: "Support",
-          value: "support"
-        },
-        {
-          label: "Collab",
-          value: "collab"
-        },
-        {
-          label: "Report",
-          value: "report"
-        },
-        {
-          label: "WL Help",
-          value: "wl-help"
-        }
-      ]);
+      }, 3000);
+    }
 
+  } catch (err) {
 
+    console.log(err);
 
-    const row = new ActionRowBuilder().addComponents(
-      menu
-    );
+    if (interaction.deferred) {
 
+      return interaction.editReply({
+        content:
+          "❌ Something went wrong."
+      });
+    }
 
+    if (!interaction.replied) {
 
-    await message.channel.send({
-      embeds: [embed],
-      components: [row]
-    });
+      return interaction.reply({
+        content:
+          "❌ Something went wrong.",
+        flags: MessageFlags.Ephemeral
+      });
+    }
   }
 });
 
