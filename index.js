@@ -23,8 +23,6 @@ const client = new Client({
   ]
 });
 
-
-
 // ==================================================
 // IDS
 // ==================================================
@@ -41,8 +39,6 @@ const SUPPORT_TRANSCRIPT_CHANNEL_ID =
 const COLLAB_TRANSCRIPT_CHANNEL_ID =
   "1527352927960698994";
 
-
-
 // ==================================================
 // SETTINGS
 // ==================================================
@@ -57,14 +53,8 @@ const ALLOWED_TICKET_TYPES = [
   "collab"
 ];
 
-/*
-  Aynı ticketın aynı anda iki kez
-  kapatılmasını engeller.
-*/
-
+// Aynı ticketın aynı anda iki kez kapatılmasını engeller.
 const closingTickets = new Set();
-
-
 
 // ==================================================
 // TICKET PANEL
@@ -87,7 +77,6 @@ function createTicketPanel() {
           .setCustomId("ticket_select")
           .setPlaceholder("▼ Select Menu")
           .addOptions(
-
             new StringSelectMenuOptionBuilder()
               .setLabel("Support")
               .setDescription(
@@ -106,8 +95,6 @@ function createTicketPanel() {
     ]
   };
 }
-
-
 
 // ==================================================
 // GENERAL HELPERS
@@ -128,8 +115,6 @@ function formatDate(timestamp) {
   );
 }
 
-
-
 function truncate(value, maxLength) {
   const text = String(value ?? "");
 
@@ -142,13 +127,6 @@ function truncate(value, maxLength) {
     Math.max(0, maxLength - 3)
   )}...`;
 }
-
-
-
-/*
-  Ticket kanalının konusundaki
-  bilgileri okur.
-*/
 
 function parseTicketMetadata(topic = "") {
   const ownerMatch =
@@ -181,13 +159,6 @@ function parseTicketMetadata(topic = "") {
   };
 }
 
-
-
-/*
-  Ticket türüne göre transcript
-  kanalını seçer.
-*/
-
 function getTranscriptChannelId(type) {
   if (type === "support") {
     return SUPPORT_TRANSCRIPT_CHANNEL_ID;
@@ -199,8 +170,6 @@ function getTranscriptChannelId(type) {
 
   return null;
 }
-
-
 
 // ==================================================
 // FETCH ALL TICKET MESSAGES
@@ -237,10 +206,6 @@ async function fetchAllMessages(channel) {
     }
   }
 
-  /*
-    Mesajları eskiden yeniye doğru sıralar.
-  */
-
   return messages.sort(
     (first, second) =>
       first.createdTimestamp -
@@ -248,10 +213,32 @@ async function fetchAllMessages(channel) {
   );
 }
 
+/*
+  Botun ticket açılırken gönderdiği ilk mesajı bulur.
 
+  Bu mesajın içinde CLOSE düğmesi bulunduğu için
+  gerçek kullanıcı konuşmalarından ayrılabilir.
+*/
+
+function isOpeningBotMessage(message) {
+  if (
+    message.author.id !==
+    client.user.id
+  ) {
+    return false;
+  }
+
+  return message.components.some(row =>
+    row.components.some(
+      component =>
+        component.customId ===
+        "close_ticket"
+    )
+  );
+}
 
 // ==================================================
-// DISCORD THREAD HELPERS
+// DISCORD THREAD TRANSCRIPT HELPERS
 // ==================================================
 
 function getMessageDisplayName(message) {
@@ -262,13 +249,6 @@ function getMessageDisplayName(message) {
   );
 }
 
-
-
-/*
-  Orijinal mesajdaki embedlerin
-  metinlerini alır.
-*/
-
 function getOriginalEmbedText(message) {
   if (!message.embeds.length) {
     return "";
@@ -277,7 +257,6 @@ function getOriginalEmbedText(message) {
   const parts = [];
 
   for (const embed of message.embeds) {
-
     if (embed.title) {
       parts.push(
         `**Embed:** ${embed.title}`
@@ -309,13 +288,6 @@ function getOriginalEmbedText(message) {
   return parts.join("\n\n");
 }
 
-
-
-/*
-  Sticker bilgilerini transcript
-  mesajına ekler.
-*/
-
 function getStickerText(message) {
   if (!message.stickers?.size) {
     return "";
@@ -328,13 +300,6 @@ function getStickerText(message) {
     )
     .join("\n");
 }
-
-
-
-/*
-  Dosya yeniden yüklenemezse
-  dosya bağlantılarını gösterir.
-*/
 
 function getAttachmentLinksText(message) {
   if (!message.attachments.size) {
@@ -357,11 +322,9 @@ function getAttachmentLinksText(message) {
     .join("\n");
 }
 
-
-
 /*
   Orijinal Discord mesajını transcript
-  thread'i için embed hâline getirir.
+  thread'i için bir karta dönüştürür.
 */
 
 function buildThreadEmbed(
@@ -454,13 +417,11 @@ function buildThreadEmbed(
     );
 }
 
-
-
 /*
-  Mesajı transcript thread'ine gönderir.
+  Mesajı transcript thread'ine kopyalar.
 
-  Görsel veya dosya varsa Discord'a
-  yeniden yüklemeye çalışır.
+  Görsel ve dosyaları yeniden yüklemeye çalışır.
+  Yükleyemezse dosyanın bağlantısını gösterir.
 */
 
 async function copyMessageToThread(
@@ -501,11 +462,6 @@ async function copyMessageToThread(
       fileError
     );
 
-    /*
-      Dosya yeniden yüklenemezse
-      dosya bağlantısıyla gönderir.
-    */
-
     await thread.send({
       embeds: [
         buildThreadEmbed(
@@ -521,28 +477,19 @@ async function copyMessageToThread(
   }
 }
 
-
-
 /*
-  Log mesajının altında transcript
-  thread'i oluşturur.
+  Kapanış kartının altında transcript thread'i açar.
+
+  Ekstra bir "Collab Transcript" veya
+  "Support Transcript" kartı göndermez.
+  Böylece aynı bilgiler iki kez görünmez.
 */
 
 async function createDiscordThreadTranscript({
   logMessage,
   ticketChannel,
-  ticketType,
-  messages,
-  ownerId,
-  closedBy
+  messages
 }) {
-  /*
-    Önceki sürümde collab-collab gibi
-    tekrar oluşuyordu.
-
-    Bu sürümde yalnızca kanal adı kullanılır.
-  */
-
   const threadName =
     truncate(
       `${ticketChannel.name}-transcript`,
@@ -562,44 +509,10 @@ async function createDiscordThreadTranscript({
     });
 
   /*
-    Thread'in ilk bilgi mesajı.
-  */
+    Burada ekstra özet mesajı gönderilmiyor.
 
-  await thread.send({
-    embeds: [
-      new EmbedBuilder()
-        .setTitle(
-          ticketType === "support"
-            ? "🎫 Support Transcript"
-            : "🤝 Collab Transcript"
-        )
-        .setDescription(
-          [
-            `**Original ticket:** #${ticketChannel.name}`,
-
-            `**Opened by:** ${
-              ownerId
-                ? `<@${ownerId}>`
-                : "Unknown"
-            }`,
-
-            `**Closed by:** ${closedBy}`,
-
-            `**Messages copied:** ${messages.length}`
-          ].join("\n")
-        )
-        .setColor("#ff0000")
-        .setTimestamp()
-    ],
-
-    allowedMentions: {
-      parse: []
-    }
-  });
-
-  /*
-    Bütün ticket mesajlarını sırayla
-    thread içine aktarır.
+    Discord kapanış kartını thread'in
+    en üstünde zaten otomatik gösteriyor.
   */
 
   for (const message of messages) {
@@ -611,8 +524,6 @@ async function createDiscordThreadTranscript({
 
   return thread;
 }
-
-
 
 // ==================================================
 // BOT READY
@@ -643,11 +554,6 @@ client.once(
         return;
       }
 
-      /*
-        Son 100 mesaj içinde mevcut
-        ticket panelini arar.
-      */
-
       const recentMessages =
         await ticketPanelChannel.messages.fetch({
           limit: 100
@@ -669,11 +575,6 @@ client.once(
                 )
             )
         );
-
-      /*
-        Panel varsa günceller.
-        Fazladan panel varsa siler.
-      */
 
       if (existingPanels.size > 0) {
         const panels =
@@ -730,8 +631,6 @@ client.once(
   }
 );
 
-
-
 // ==================================================
 // INTERACTIONS
 // ==================================================
@@ -751,7 +650,6 @@ client.on(
         interaction.customId ===
           "ticket_select"
       ) {
-
         if (!interaction.guild) {
           return interaction.reply({
             content:
@@ -762,19 +660,13 @@ client.on(
           });
         }
 
-
-
         await interaction.deferReply({
           flags:
             MessageFlags.Ephemeral
         });
 
-
-
         const type =
           interaction.values[0];
-
-
 
         if (
           !ALLOWED_TICKET_TYPES.includes(
@@ -787,11 +679,9 @@ client.on(
           });
         }
 
-
-
         /*
-          Kullanıcının aynı türde açık
-          ticketı var mı kontrol eder.
+          Kullanıcının aynı kategoride
+          açık ticketı olup olmadığını kontrol eder.
         */
 
         const existingTicket =
@@ -810,16 +700,12 @@ client.on(
               )
           );
 
-
-
         if (existingTicket) {
           return interaction.editReply({
             content:
               `❌ You already have an open ${type} ticket: ${existingTicket}`
           });
         }
-
-
 
         const safeUsername =
           interaction.user.username
@@ -833,18 +719,13 @@ client.on(
               18
             );
 
-
-
         const usernamePart =
           safeUsername ||
           "user";
 
-
-
         const ticketName =
-          `${type}-${usernamePart}-${interaction.user.id.slice(-6)}`;
-
-
+          `${type}-${usernamePart}-` +
+          `${interaction.user.id.slice(-6)}`;
 
         // ==============================================
         // TICKET CHANNEL PERMISSIONS
@@ -852,10 +733,7 @@ client.on(
 
         const permissionOverwrites = [
 
-          /*
-            @everyone ticket kanalını göremez.
-          */
-
+          // @everyone ticket kanalını göremez
           {
             id:
               interaction.guild.id,
@@ -867,12 +745,7 @@ client.on(
             ]
           },
 
-
-
-          /*
-            Eternal Blades botunun izinleri.
-          */
-
+          // Eternal Blades botu
           {
             id:
               client.user.id,
@@ -904,12 +777,7 @@ client.on(
             ]
           },
 
-
-
-          /*
-            Ticket açan kullanıcının izinleri.
-          */
-
+          // Ticketı açan kullanıcı
           {
             id:
               interaction.user.id,
@@ -937,8 +805,6 @@ client.on(
             ]
           }
         ];
-
-
 
         // ==============================================
         // STAFF ACCESS
@@ -989,16 +855,12 @@ client.on(
           }
         }
 
-
-
         // ==============================================
         // CREATE TICKET CHANNEL
         // ==============================================
 
         const openedAt =
           Date.now();
-
-
 
         const ticketChannel =
           await interaction.guild.channels.create({
@@ -1026,8 +888,6 @@ client.on(
               `${type} ticket opened by ${interaction.user.tag}`
           });
 
-
-
         // ==============================================
         // CLOSE BUTTON
         // ==============================================
@@ -1047,14 +907,10 @@ client.on(
               ButtonStyle.Danger
             );
 
-
-
         const ticketTitle =
           type === "support"
             ? "🎫 SUPPORT Ticket"
             : "🤝 COLLAB Ticket";
-
-
 
         const ticketDescription =
           type === "support"
@@ -1070,8 +926,6 @@ client.on(
               "and explain your collaboration proposal.\n\n" +
               "Our team will review it shortly."
             );
-
-
 
         await ticketChannel.send({
           content:
@@ -1109,18 +963,14 @@ client.on(
           ]
         });
 
-
-
         return interaction.editReply({
           content:
             `✅ Ticket created: ${ticketChannel}`
         });
       }
 
-
-
       // ==============================================
-      // CLOSE TICKET + DISCORD THREAD TRANSCRIPT
+      // CLOSE TICKET + THREAD TRANSCRIPT
       // ==============================================
 
       if (
@@ -1128,7 +978,6 @@ client.on(
         interaction.customId ===
           "close_ticket"
       ) {
-
         if (
           !interaction.guild ||
           !interaction.channel
@@ -1142,19 +991,10 @@ client.on(
           });
         }
 
-
-
-        /*
-          Düğmeye basan kişinin rollerini
-          Discord'dan yeniden çeker.
-        */
-
         const member =
           await interaction.guild.members.fetch(
             interaction.user.id
           );
-
-
 
         const isStaff =
           member.roles.cache.some(
@@ -1164,11 +1004,9 @@ client.on(
               )
           );
 
-
-
         /*
-          Ticket sahibi kapatamaz.
-          Sadece staff kapatabilir.
+          Ticketı yalnızca yetkililer kapatabilir.
+          Ticketı açan normal kullanıcı kapatamaz.
         */
 
         if (!isStaff) {
@@ -1180,13 +1018,6 @@ client.on(
               MessageFlags.Ephemeral
           });
         }
-
-
-
-        /*
-          Ticket zaten kapanıyorsa ikinci
-          kapatma işlemini engeller.
-        */
 
         if (
           closingTickets.has(
@@ -1202,39 +1033,24 @@ client.on(
           });
         }
 
-
-
         const ticketChannel =
           interaction.channel;
 
         const ticketChannelId =
           ticketChannel.id;
 
-
-
         closingTickets.add(
           ticketChannelId
         );
-
-
 
         await interaction.deferReply({
           flags:
             MessageFlags.Ephemeral
         });
 
-
-
-        /*
-          Arşiv oluşturulurken hata çıkarsa
-          yarım kalan log ve thread temizlenir.
-        */
-
         let logMessage = null;
 
         let transcriptThread = null;
-
-
 
         try {
           const metadata =
@@ -1242,8 +1058,6 @@ client.on(
               ticketChannel.topic ||
               ""
             );
-
-
 
           if (
             !metadata.type ||
@@ -1257,14 +1071,10 @@ client.on(
             );
           }
 
-
-
           const transcriptChannelId =
             getTranscriptChannelId(
               metadata.type
             );
-
-
 
           if (!transcriptChannelId) {
             throw new Error(
@@ -1272,14 +1082,10 @@ client.on(
             );
           }
 
-
-
           const transcriptChannel =
             await client.channels.fetch(
               transcriptChannelId
             );
-
-
 
           if (
             !transcriptChannel ||
@@ -1291,31 +1097,39 @@ client.on(
             );
           }
 
-
-
           /*
-            Bütün ticket mesajlarını toplar.
+            Ticket içerisindeki bütün
+            mesajları toplar.
           */
 
-          const messages =
+          const allMessages =
             await fetchAllMessages(
               ticketChannel
             );
 
+          /*
+            Botun ticket açılış kartını kaldırır.
 
+            Böylece thread içinde yalnızca
+            gerçek kullanıcı ve yetkili mesajları kalır.
+          */
+
+          const transcriptMessages =
+            allMessages.filter(
+              message =>
+                !isOpeningBotMessage(
+                  message
+                )
+            );
 
           const closedAt =
             Date.now();
-
-
 
           const openedAt =
             metadata.openedAt ||
 
             ticketChannel
               .createdTimestamp;
-
-
 
           const ownerText =
             metadata.ownerId
@@ -1327,11 +1141,9 @@ client.on(
 
               : "Unknown";
 
-
-
           /*
-            Transcript kanalındaki
-            kapanış kartı.
+            Transcript kanalına gönderilen
+            tek kapanış kartı.
           */
 
           const logEmbed =
@@ -1347,7 +1159,6 @@ client.on(
                 "#ff0000"
               )
               .addFields(
-
                 {
                   name:
                     "Ticket",
@@ -1413,7 +1224,7 @@ client.on(
 
                   value:
                     String(
-                      messages.length
+                      transcriptMessages.length
                     ),
 
                   inline:
@@ -1426,11 +1237,9 @@ client.on(
               })
               .setTimestamp();
 
-
-
           /*
-            HTML veya başka bir dosya eklenmez.
-            Sadece kapanış kartı gönderilir.
+            HTML veya TXT dosyası gönderilmez.
+            Yalnızca kapanış kartı gönderilir.
           */
 
           logMessage =
@@ -1444,8 +1253,6 @@ client.on(
               ]
             });
 
-
-
           /*
             Kapanış kartının altında
             Discord transcript thread'i açılır.
@@ -1457,22 +1264,12 @@ client.on(
 
               ticketChannel,
 
-              ticketType:
-                metadata.type,
-
-              messages,
-
-              ownerId:
-                metadata.ownerId,
-
-              closedBy:
-                `${interaction.user} (${interaction.user.id})`
+              messages:
+                transcriptMessages
             });
 
-
-
           /*
-            VIEW TRANSCRIPT düğmesi.
+            Thread'e giden buton.
           */
 
           const viewThreadButton =
@@ -1492,8 +1289,6 @@ client.on(
                 `${interaction.guild.id}/${transcriptThread.id}`
               );
 
-
-
           await logMessage.edit({
             components: [
               new ActionRowBuilder()
@@ -1503,18 +1298,14 @@ client.on(
             ]
           });
 
-
-
         } catch (archiveError) {
           console.error(
             "Transcript creation error:",
             archiveError
           );
 
-
-
           /*
-            Thread yarım oluşturulduysa temizler.
+            Thread yarım oluşturulduysa siler.
           */
 
           if (transcriptThread) {
@@ -1525,10 +1316,8 @@ client.on(
               );
           }
 
-
-
           /*
-            Log kartı yarım oluşturulduysa temizler.
+            Kapanış kartı yarım oluşturulduysa siler.
           */
 
           if (logMessage) {
@@ -1539,17 +1328,13 @@ client.on(
               );
           }
 
-
-
           closingTickets.delete(
             ticketChannelId
           );
 
-
-
           /*
-            Transcript tamamlanmadığı için
-            ticket kanalı silinmez.
+            Transcript tamamlanmadıysa
+            ticket kanalını silmez.
           */
 
           return interaction.editReply({
@@ -1558,14 +1343,10 @@ client.on(
           });
         }
 
-
-
         await interaction.editReply({
           content:
             "✅ Discord transcript saved successfully. This ticket will close in 3 seconds."
         });
-
-
 
         await new Promise(
           resolve =>
@@ -1575,10 +1356,8 @@ client.on(
             )
         );
 
-
-
         /*
-          Transcript başarıyla kaydedildikten
+          Transcript başarıyla oluşturulduktan
           sonra ticket kanalını siler.
         */
 
@@ -1597,18 +1376,9 @@ client.on(
             deleteError
           );
 
-
-
           closingTickets.delete(
             ticketChannelId
           );
-
-
-
-          /*
-            Transcript kaydedilmiş fakat kanal
-            silinememişse bunu bildirir.
-          */
 
           return interaction.editReply({
             content:
@@ -1619,15 +1389,11 @@ client.on(
         }
       }
 
-
-
     } catch (error) {
       console.error(
         "Interaction error:",
         error
       );
-
-
 
       if (interaction.deferred) {
         return interaction.editReply({
@@ -1637,8 +1403,6 @@ client.on(
           () => {}
         );
       }
-
-
 
       if (!interaction.replied) {
         return interaction.reply({
@@ -1654,8 +1418,6 @@ client.on(
     }
   }
 );
-
-
 
 // ==================================================
 // BOT LOGIN
