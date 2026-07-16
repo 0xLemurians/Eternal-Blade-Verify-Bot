@@ -10,8 +10,8 @@ import {
   Events,
   StringSelectMenuBuilder,
   StringSelectMenuOptionBuilder,
-  AttachmentBuilder,
-  ThreadAutoArchiveDuration
+  ThreadAutoArchiveDuration,
+  MessageFlags
 } from "discord.js";
 
 const client = new Client({
@@ -44,7 +44,7 @@ const COLLAB_TRANSCRIPT_CHANNEL_ID =
 
 
 // ==================================================
-// STAFF / TICKET SETTINGS
+// SETTINGS
 // ==================================================
 
 const STAFF_ROLES = [
@@ -58,8 +58,8 @@ const ALLOWED_TICKET_TYPES = [
 ];
 
 /*
-  Aynı ticket için iki kapatma işleminin
-  aynı anda başlamasını engeller.
+  Aynı ticketın aynı anda iki kez
+  kapatılmasını engeller.
 */
 
 const closingTickets = new Set();
@@ -113,17 +113,6 @@ function createTicketPanel() {
 // GENERAL HELPERS
 // ==================================================
 
-function escapeHtml(value = "") {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
-}
-
-
-
 function formatDate(timestamp) {
   return new Date(timestamp).toLocaleString(
     "tr-TR",
@@ -142,43 +131,24 @@ function formatDate(timestamp) {
 
 
 function truncate(value, maxLength) {
-  const text =
-    String(value ?? "");
+  const text = String(value ?? "");
 
-  return text.length > maxLength
-    ? `${text.slice(
-        0,
-        Math.max(0, maxLength - 3)
-      )}...`
-    : text;
+  if (text.length <= maxLength) {
+    return text;
+  }
+
+  return `${text.slice(
+    0,
+    Math.max(0, maxLength - 3)
+  )}...`;
 }
 
 
 
-function sanitizeFileName(value = "file") {
-  const cleaned =
-    String(value)
-      .replace(
-        /[\\/:*?"<>|]/g,
-        "-"
-      )
-      .replace(
-        /\s+/g,
-        "-"
-      )
-      .replace(
-        /-+/g,
-        "-"
-      )
-      .replace(
-        /^-|-$/g,
-        ""
-      );
-
-  return cleaned || "file";
-}
-
-
+/*
+  Ticket kanalının konusundaki
+  bilgileri okur.
+*/
 
 function parseTicketMetadata(topic = "") {
   const ownerMatch =
@@ -213,6 +183,11 @@ function parseTicketMetadata(topic = "") {
 
 
 
+/*
+  Ticket türüne göre transcript
+  kanalını seçer.
+*/
+
 function getTranscriptChannelId(type) {
   if (type === "support") {
     return SUPPORT_TRANSCRIPT_CHANNEL_ID;
@@ -226,6 +201,10 @@ function getTranscriptChannelId(type) {
 }
 
 
+
+// ==================================================
+// FETCH ALL TICKET MESSAGES
+// ==================================================
 
 async function fetchAllMessages(channel) {
   const messages = [];
@@ -259,7 +238,7 @@ async function fetchAllMessages(channel) {
   }
 
   /*
-    Mesajları eskiden yeniye sıralar.
+    Mesajları eskiden yeniye doğru sıralar.
   */
 
   return messages.sort(
@@ -272,833 +251,7 @@ async function fetchAllMessages(channel) {
 
 
 // ==================================================
-// HTML TRANSCRIPT HELPERS
-// ==================================================
-
-function renderHtmlAttachment(
-  attachment
-) {
-  const safeName =
-    escapeHtml(
-      attachment.name ||
-      "attachment"
-    );
-
-  const safeUrl =
-    escapeHtml(
-      attachment.url
-    );
-
-  const contentType =
-    attachment.contentType || "";
-
-  const isImage =
-    contentType.startsWith("image/") ||
-
-    /\.(png|jpe?g|gif|webp)$/i.test(
-      attachment.name || ""
-    );
-
-  if (isImage) {
-    return `
-      <div class="attachment">
-
-        <a
-          href="${safeUrl}"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <img
-            src="${safeUrl}"
-            alt="${safeName}"
-          >
-        </a>
-
-        <a
-          class="attachment-link"
-          href="${safeUrl}"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          ${safeName}
-        </a>
-
-      </div>
-    `;
-  }
-
-  return `
-    <div class="attachment file">
-
-      📎
-
-      <a
-        href="${safeUrl}"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        ${safeName}
-      </a>
-
-    </div>
-  `;
-}
-
-
-
-function renderHtmlEmbed(embed) {
-  const title =
-    embed.title
-      ? `
-        <div class="embed-title">
-          ${escapeHtml(embed.title)}
-        </div>
-      `
-      : "";
-
-  const description =
-    embed.description
-      ? `
-        <div class="embed-description">
-
-          ${escapeHtml(
-            embed.description
-          ).replaceAll(
-            "\n",
-            "<br>"
-          )}
-
-        </div>
-      `
-      : "";
-
-  const fields =
-    embed.fields?.length
-      ? `
-        <div class="embed-fields">
-
-          ${embed.fields
-            .map(
-              field => `
-                <div class="embed-field">
-
-                  <strong>
-                    ${escapeHtml(
-                      field.name
-                    )}
-                  </strong>
-
-                  <div>
-                    ${escapeHtml(
-                      field.value
-                    ).replaceAll(
-                      "\n",
-                      "<br>"
-                    )}
-                  </div>
-
-                </div>
-              `
-            )
-            .join("")}
-
-        </div>
-      `
-      : "";
-
-  const image =
-    embed.image?.url
-      ? `
-        <img
-          class="embed-image"
-          src="${escapeHtml(
-            embed.image.url
-          )}"
-          alt="Embed image"
-        >
-      `
-      : "";
-
-  return `
-    <div class="discord-embed">
-
-      ${title}
-
-      ${description}
-
-      ${fields}
-
-      ${image}
-
-    </div>
-  `;
-}
-
-
-
-function renderHtmlMessage(message) {
-  const displayName =
-    message.member?.displayName ||
-    message.author.globalName ||
-    message.author.username;
-
-  const avatarUrl =
-    message.author.displayAvatarURL({
-      extension: "png",
-      size: 64
-    });
-
-  const content =
-    message.content
-      ? `
-        <div class="message-content">
-
-          ${escapeHtml(
-            message.content
-          ).replaceAll(
-            "\n",
-            "<br>"
-          )}
-
-        </div>
-      `
-      : "";
-
-  const attachments =
-    message.attachments.size
-      ? `
-        <div class="attachments">
-
-          ${message.attachments
-            .map(
-              renderHtmlAttachment
-            )
-            .join("")}
-
-        </div>
-      `
-      : "";
-
-  const embeds =
-    message.embeds.length
-      ? `
-        <div class="embeds">
-
-          ${message.embeds
-            .map(
-              renderHtmlEmbed
-            )
-            .join("")}
-
-        </div>
-      `
-      : "";
-
-  const stickers =
-    message.stickers?.size
-      ? `
-        <div class="stickers">
-
-          ${message.stickers
-            .map(
-              sticker => `
-                <a
-                  href="${escapeHtml(
-                    sticker.url
-                  )}"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Sticker:
-                  ${escapeHtml(
-                    sticker.name
-                  )}
-                </a>
-              `
-            )
-            .join("<br>")}
-
-        </div>
-      `
-      : "";
-
-  return `
-    <article class="message">
-
-      <img
-        class="avatar"
-        src="${escapeHtml(
-          avatarUrl
-        )}"
-        alt="Avatar"
-      >
-
-      <div class="message-body">
-
-        <div class="message-header">
-
-          <span class="author">
-            ${escapeHtml(
-              displayName
-            )}
-          </span>
-
-          ${
-            message.author.bot
-              ? `
-                <span class="bot-badge">
-                  BOT
-                </span>
-              `
-              : ""
-          }
-
-          <span class="timestamp">
-
-            ${escapeHtml(
-              formatDate(
-                message.createdTimestamp
-              )
-            )}
-
-          </span>
-
-        </div>
-
-        ${content}
-
-        ${attachments}
-
-        ${embeds}
-
-        ${stickers}
-
-      </div>
-
-    </article>
-  `;
-}
-
-
-
-function buildTranscriptHtml({
-  guildName,
-  channelName,
-  ticketType,
-  ownerId,
-  closedBy,
-  openedAt,
-  closedAt,
-  messages
-}) {
-  const messageHtml =
-    messages.length
-      ? messages
-          .map(
-            renderHtmlMessage
-          )
-          .join("\n")
-      : `
-        <div class="empty">
-          Bu ticket içinde kayıtlı
-          mesaj bulunamadı.
-        </div>
-      `;
-
-  return `
-<!doctype html>
-
-<html lang="tr">
-
-<head>
-
-  <meta charset="utf-8">
-
-  <meta
-    name="viewport"
-    content="width=device-width, initial-scale=1"
-  >
-
-  <title>
-    ${escapeHtml(channelName)} transcript
-  </title>
-
-  <style>
-
-    :root {
-      color-scheme: dark;
-
-      --background: #0d1117;
-      --panel: #161b22;
-      --panel-2: #1f2630;
-      --border: #30363d;
-      --text: #e6edf3;
-      --muted: #8b949e;
-      --accent: #ff3030;
-      --link: #58a6ff;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-
-      background:
-        var(--background);
-
-      color:
-        var(--text);
-
-      font-family:
-        Inter,
-        ui-sans-serif,
-        system-ui,
-        -apple-system,
-        BlinkMacSystemFont,
-        "Segoe UI",
-        sans-serif;
-    }
-
-    .container {
-      width:
-        min(
-          1100px,
-          calc(100% - 32px)
-        );
-
-      margin:
-        32px auto;
-    }
-
-    .summary {
-      background:
-        var(--panel);
-
-      border:
-        1px solid
-        var(--border);
-
-      border-left:
-        4px solid
-        var(--accent);
-
-      border-radius:
-        10px;
-
-      padding:
-        20px;
-
-      margin-bottom:
-        20px;
-    }
-
-    .summary h1 {
-      margin:
-        0 0 14px;
-
-      font-size:
-        24px;
-    }
-
-    .summary-grid {
-      display:
-        grid;
-
-      grid-template-columns:
-        repeat(
-          auto-fit,
-          minmax(
-            220px,
-            1fr
-          )
-        );
-
-      gap:
-        10px;
-
-      color:
-        var(--muted);
-    }
-
-    .summary-grid strong {
-      color:
-        var(--text);
-    }
-
-    .messages {
-      background:
-        var(--panel);
-
-      border:
-        1px solid
-        var(--border);
-
-      border-radius:
-        10px;
-
-      overflow:
-        hidden;
-    }
-
-    .message {
-      display:
-        flex;
-
-      gap:
-        14px;
-
-      padding:
-        16px 18px;
-
-      border-bottom:
-        1px solid
-        var(--border);
-    }
-
-    .message:last-child {
-      border-bottom:
-        0;
-    }
-
-    .message:hover {
-      background:
-        rgba(
-          255,
-          255,
-          255,
-          0.02
-        );
-    }
-
-    .avatar {
-      width:
-        42px;
-
-      height:
-        42px;
-
-      border-radius:
-        50%;
-
-      flex:
-        0 0 auto;
-    }
-
-    .message-body {
-      min-width:
-        0;
-
-      flex:
-        1;
-    }
-
-    .message-header {
-      display:
-        flex;
-
-      align-items:
-        center;
-
-      flex-wrap:
-        wrap;
-
-      gap:
-        8px;
-
-      margin-bottom:
-        5px;
-    }
-
-    .author {
-      font-weight:
-        700;
-    }
-
-    .timestamp {
-      color:
-        var(--muted);
-
-      font-size:
-        12px;
-    }
-
-    .bot-badge {
-      background:
-        #5865f2;
-
-      color:
-        white;
-
-      border-radius:
-        3px;
-
-      padding:
-        1px 5px;
-
-      font-size:
-        10px;
-
-      font-weight:
-        700;
-    }
-
-    .message-content {
-      line-height:
-        1.55;
-
-      overflow-wrap:
-        anywhere;
-    }
-
-    a {
-      color:
-        var(--link);
-    }
-
-    .attachments,
-    .embeds,
-    .stickers {
-      margin-top:
-        10px;
-    }
-
-    .attachment {
-      margin-top:
-        8px;
-    }
-
-    .attachment img,
-    .embed-image {
-      display:
-        block;
-
-      max-width:
-        min(
-          560px,
-          100%
-        );
-
-      max-height:
-        500px;
-
-      object-fit:
-        contain;
-
-      border-radius:
-        8px;
-
-      border:
-        1px solid
-        var(--border);
-
-      margin-bottom:
-        5px;
-    }
-
-    .attachment-link {
-      display:
-        inline-block;
-
-      font-size:
-        13px;
-    }
-
-    .discord-embed {
-      max-width:
-        620px;
-
-      background:
-        var(--panel-2);
-
-      border:
-        1px solid
-        var(--border);
-
-      border-left:
-        4px solid
-        var(--accent);
-
-      border-radius:
-        5px;
-
-      padding:
-        12px;
-
-      margin-top:
-        8px;
-    }
-
-    .embed-title {
-      font-weight:
-        700;
-
-      margin-bottom:
-        6px;
-    }
-
-    .embed-description {
-      line-height:
-        1.45;
-    }
-
-    .embed-fields {
-      display:
-        grid;
-
-      grid-template-columns:
-        repeat(
-          auto-fit,
-          minmax(
-            180px,
-            1fr
-          )
-        );
-
-      gap:
-        10px;
-
-      margin-top:
-        10px;
-    }
-
-    .embed-field {
-      background:
-        rgba(
-          0,
-          0,
-          0,
-          0.14
-        );
-
-      border-radius:
-        5px;
-
-      padding:
-        8px;
-    }
-
-    .empty {
-      padding:
-        24px;
-
-      color:
-        var(--muted);
-
-      text-align:
-        center;
-    }
-
-    footer {
-      color:
-        var(--muted);
-
-      text-align:
-        center;
-
-      padding:
-        18px 0 4px;
-
-      font-size:
-        12px;
-    }
-
-  </style>
-
-</head>
-
-<body>
-
-  <main class="container">
-
-    <section class="summary">
-
-      <h1>
-        ⚔️ Eternal Blades
-        Ticket Transcript
-      </h1>
-
-      <div class="summary-grid">
-
-        <div>
-          <strong>Sunucu:</strong>
-          ${escapeHtml(guildName)}
-        </div>
-
-        <div>
-          <strong>Kanal:</strong>
-          #${escapeHtml(channelName)}
-        </div>
-
-        <div>
-          <strong>Tür:</strong>
-          ${escapeHtml(
-            ticketType.toUpperCase()
-          )}
-        </div>
-
-        <div>
-          <strong>Ticket sahibi ID:</strong>
-          ${escapeHtml(
-            ownerId ||
-            "Bilinmiyor"
-          )}
-        </div>
-
-        <div>
-          <strong>Kapatan yetkili:</strong>
-          ${escapeHtml(closedBy)}
-        </div>
-
-        <div>
-          <strong>Açılış:</strong>
-          ${escapeHtml(
-            formatDate(openedAt)
-          )}
-        </div>
-
-        <div>
-          <strong>Kapanış:</strong>
-          ${escapeHtml(
-            formatDate(closedAt)
-          )}
-        </div>
-
-        <div>
-          <strong>Mesaj sayısı:</strong>
-          ${messages.length}
-        </div>
-
-      </div>
-
-    </section>
-
-    <section class="messages">
-
-      ${messageHtml}
-
-    </section>
-
-    <footer>
-
-      Eternal Blades tarafından
-      otomatik oluşturulmuştur.
-
-    </footer>
-
-  </main>
-
-</body>
-
-</html>
-  `;
-}
-
-
-
-// ==================================================
-// DISCORD THREAD TRANSCRIPT HELPERS
+// DISCORD THREAD HELPERS
 // ==================================================
 
 function getMessageDisplayName(message) {
@@ -1111,6 +264,11 @@ function getMessageDisplayName(message) {
 
 
 
+/*
+  Orijinal mesajdaki embedlerin
+  metinlerini alır.
+*/
+
 function getOriginalEmbedText(message) {
   if (!message.embeds.length) {
     return "";
@@ -1119,6 +277,7 @@ function getOriginalEmbedText(message) {
   const parts = [];
 
   for (const embed of message.embeds) {
+
     if (embed.title) {
       parts.push(
         `**Embed:** ${embed.title}`
@@ -1152,6 +311,11 @@ function getOriginalEmbedText(message) {
 
 
 
+/*
+  Sticker bilgilerini transcript
+  mesajına ekler.
+*/
+
 function getStickerText(message) {
   if (!message.stickers?.size) {
     return "";
@@ -1166,6 +330,11 @@ function getStickerText(message) {
 }
 
 
+
+/*
+  Dosya yeniden yüklenemezse
+  dosya bağlantılarını gösterir.
+*/
 
 function getAttachmentLinksText(message) {
   if (!message.attachments.size) {
@@ -1189,6 +358,11 @@ function getAttachmentLinksText(message) {
 }
 
 
+
+/*
+  Orijinal Discord mesajını transcript
+  thread'i için embed hâline getirir.
+*/
 
 function buildThreadEmbed(
   message,
@@ -1282,18 +456,17 @@ function buildThreadEmbed(
 
 
 
+/*
+  Mesajı transcript thread'ine gönderir.
+
+  Görsel veya dosya varsa Discord'a
+  yeniden yüklemeye çalışır.
+*/
+
 async function copyMessageToThread(
   thread,
   message
 ) {
-  /*
-    Mesaja eklenen görselleri ve dosyaları
-    thread'e yeniden yükler.
-
-    Böylece orijinal ticket silinse bile
-    thread'deki kopya kalır.
-  */
-
   const files =
     message.attachments.map(
       attachment => ({
@@ -1301,10 +474,8 @@ async function copyMessageToThread(
           attachment.url,
 
         name:
-          sanitizeFileName(
-            attachment.name ||
-            `attachment-${attachment.id}`
-          )
+          attachment.name ||
+          `attachment-${attachment.id}`
       })
     );
 
@@ -1331,8 +502,8 @@ async function copyMessageToThread(
     );
 
     /*
-      Dosya yeniden yüklenemezse mesajı
-      dosya bağlantılarıyla gönderir.
+      Dosya yeniden yüklenemezse
+      dosya bağlantısıyla gönderir.
     */
 
     await thread.send({
@@ -1352,6 +523,11 @@ async function copyMessageToThread(
 
 
 
+/*
+  Log mesajının altında transcript
+  thread'i oluşturur.
+*/
+
 async function createDiscordThreadTranscript({
   logMessage,
   ticketChannel,
@@ -1360,18 +536,18 @@ async function createDiscordThreadTranscript({
   ownerId,
   closedBy
 }) {
+  /*
+    Önceki sürümde collab-collab gibi
+    tekrar oluşuyordu.
+
+    Bu sürümde yalnızca kanal adı kullanılır.
+  */
+
   const threadName =
     truncate(
-      `${ticketType}-${ticketChannel.name}-transcript`,
+      `${ticketChannel.name}-transcript`,
       100
     );
-
-  /*
-    Log mesajının altında thread açar.
-
-    Thread 24 saat hareketsizlikten sonra
-    arşivlenir fakat silinmez.
-  */
 
   const thread =
     await logMessage.startThread({
@@ -1384,6 +560,10 @@ async function createDiscordThreadTranscript({
       reason:
         `Transcript for ${ticketChannel.name}`
     });
+
+  /*
+    Thread'in ilk bilgi mesajı.
+  */
 
   await thread.send({
     embeds: [
@@ -1418,8 +598,8 @@ async function createDiscordThreadTranscript({
   });
 
   /*
-    Ticket mesajlarını sırasıyla
-    Discord thread'ine aktarır.
+    Bütün ticket mesajlarını sırayla
+    thread içine aktarır.
   */
 
   for (const message of messages) {
@@ -1463,6 +643,11 @@ client.once(
         return;
       }
 
+      /*
+        Son 100 mesaj içinde mevcut
+        ticket panelini arar.
+      */
+
       const recentMessages =
         await ticketPanelChannel.messages.fetch({
           limit: 100
@@ -1484,6 +669,11 @@ client.once(
                 )
             )
         );
+
+      /*
+        Panel varsa günceller.
+        Fazladan panel varsa siler.
+      */
 
       if (existingPanels.size > 0) {
         const panels =
@@ -1561,23 +751,30 @@ client.on(
         interaction.customId ===
           "ticket_select"
       ) {
+
         if (!interaction.guild) {
           return interaction.reply({
             content:
               "❌ This command can only be used in a server.",
 
-            ephemeral:
-              true
+            flags:
+              MessageFlags.Ephemeral
           });
         }
 
+
+
         await interaction.deferReply({
-          ephemeral:
-            true
+          flags:
+            MessageFlags.Ephemeral
         });
+
+
 
         const type =
           interaction.values[0];
+
+
 
         if (
           !ALLOWED_TICKET_TYPES.includes(
@@ -1589,6 +786,8 @@ client.on(
               "❌ Invalid ticket category."
           });
         }
+
+
 
         /*
           Kullanıcının aynı türde açık
@@ -1611,12 +810,16 @@ client.on(
               )
           );
 
+
+
         if (existingTicket) {
           return interaction.editReply({
             content:
               `❌ You already have an open ${type} ticket: ${existingTicket}`
           });
         }
+
+
 
         const safeUsername =
           interaction.user.username
@@ -1630,20 +833,29 @@ client.on(
               18
             );
 
+
+
         const usernamePart =
           safeUsername ||
           "user";
 
+
+
         const ticketName =
           `${type}-${usernamePart}-${interaction.user.id.slice(-6)}`;
 
+
+
         // ==============================================
-        // CHANNEL PERMISSIONS
+        // TICKET CHANNEL PERMISSIONS
         // ==============================================
 
         const permissionOverwrites = [
 
-          // @everyone ticketı göremez
+          /*
+            @everyone ticket kanalını göremez.
+          */
+
           {
             id:
               interaction.guild.id,
@@ -1655,7 +867,12 @@ client.on(
             ]
           },
 
-          // Eternal Blades botu
+
+
+          /*
+            Eternal Blades botunun izinleri.
+          */
+
           {
             id:
               client.user.id,
@@ -1687,7 +904,12 @@ client.on(
             ]
           },
 
-          // Ticket açan kullanıcı
+
+
+          /*
+            Ticket açan kullanıcının izinleri.
+          */
+
           {
             id:
               interaction.user.id,
@@ -1715,6 +937,8 @@ client.on(
             ]
           }
         ];
+
+
 
         // ==============================================
         // STAFF ACCESS
@@ -1765,12 +989,16 @@ client.on(
           }
         }
 
+
+
         // ==============================================
         // CREATE TICKET CHANNEL
         // ==============================================
 
         const openedAt =
           Date.now();
+
+
 
         const ticketChannel =
           await interaction.guild.channels.create({
@@ -1798,6 +1026,8 @@ client.on(
               `${type} ticket opened by ${interaction.user.tag}`
           });
 
+
+
         // ==============================================
         // CLOSE BUTTON
         // ==============================================
@@ -1817,10 +1047,14 @@ client.on(
               ButtonStyle.Danger
             );
 
+
+
         const ticketTitle =
           type === "support"
             ? "🎫 SUPPORT Ticket"
             : "🤝 COLLAB Ticket";
+
+
 
         const ticketDescription =
           type === "support"
@@ -1836,6 +1070,8 @@ client.on(
               "and explain your collaboration proposal.\n\n" +
               "Our team will review it shortly."
             );
+
+
 
         await ticketChannel.send({
           content:
@@ -1873,14 +1109,18 @@ client.on(
           ]
         });
 
+
+
         return interaction.editReply({
           content:
             `✅ Ticket created: ${ticketChannel}`
         });
       }
 
+
+
       // ==============================================
-      // CLOSE TICKET + THREAD + HTML TRANSCRIPT
+      // CLOSE TICKET + DISCORD THREAD TRANSCRIPT
       // ==============================================
 
       if (
@@ -1888,6 +1128,7 @@ client.on(
         interaction.customId ===
           "close_ticket"
       ) {
+
         if (
           !interaction.guild ||
           !interaction.channel
@@ -1896,15 +1137,24 @@ client.on(
             content:
               "❌ Ticket channel could not be found.",
 
-            ephemeral:
-              true
+            flags:
+              MessageFlags.Ephemeral
           });
         }
+
+
+
+        /*
+          Düğmeye basan kişinin rollerini
+          Discord'dan yeniden çeker.
+        */
 
         const member =
           await interaction.guild.members.fetch(
             interaction.user.id
           );
+
+
 
         const isStaff =
           member.roles.cache.some(
@@ -1914,9 +1164,11 @@ client.on(
               )
           );
 
+
+
         /*
           Ticket sahibi kapatamaz.
-          Sadece staff roller kapatabilir.
+          Sadece staff kapatabilir.
         */
 
         if (!isStaff) {
@@ -1924,10 +1176,17 @@ client.on(
             content:
               "❌ Only authorized staff members can close this ticket.",
 
-            ephemeral:
-              true
+            flags:
+              MessageFlags.Ephemeral
           });
         }
+
+
+
+        /*
+          Ticket zaten kapanıyorsa ikinci
+          kapatma işlemini engeller.
+        */
 
         if (
           closingTickets.has(
@@ -1938,26 +1197,53 @@ client.on(
             content:
               "⏳ This ticket is already being closed.",
 
-            ephemeral:
-              true
+            flags:
+              MessageFlags.Ephemeral
           });
         }
 
+
+
+        const ticketChannel =
+          interaction.channel;
+
+        const ticketChannelId =
+          ticketChannel.id;
+
+
+
         closingTickets.add(
-          interaction.channel.id
+          ticketChannelId
         );
 
+
+
         await interaction.deferReply({
-          ephemeral:
-            true
+          flags:
+            MessageFlags.Ephemeral
         });
+
+
+
+        /*
+          Arşiv oluşturulurken hata çıkarsa
+          yarım kalan log ve thread temizlenir.
+        */
+
+        let logMessage = null;
+
+        let transcriptThread = null;
+
+
 
         try {
           const metadata =
             parseTicketMetadata(
-              interaction.channel.topic ||
+              ticketChannel.topic ||
               ""
             );
+
+
 
           if (
             !metadata.type ||
@@ -1971,10 +1257,14 @@ client.on(
             );
           }
 
+
+
           const transcriptChannelId =
             getTranscriptChannelId(
               metadata.type
             );
+
+
 
           if (!transcriptChannelId) {
             throw new Error(
@@ -1982,10 +1272,14 @@ client.on(
             );
           }
 
+
+
           const transcriptChannel =
             await client.channels.fetch(
               transcriptChannelId
             );
+
+
 
           if (
             !transcriptChannel ||
@@ -1997,88 +1291,31 @@ client.on(
             );
           }
 
+
+
           /*
-            Ticket içerisindeki bütün
-            mesajları toplar.
+            Bütün ticket mesajlarını toplar.
           */
 
           const messages =
             await fetchAllMessages(
-              interaction.channel
+              ticketChannel
             );
+
+
 
           const closedAt =
             Date.now();
 
+
+
           const openedAt =
             metadata.openedAt ||
 
-            interaction.channel
+            ticketChannel
               .createdTimestamp;
 
-          /*
-            HTML transcript oluşturulur.
-          */
 
-          const html =
-            buildTranscriptHtml({
-              guildName:
-                interaction.guild.name,
-
-              channelName:
-                interaction.channel.name,
-
-              ticketType:
-                metadata.type,
-
-              ownerId:
-                metadata.ownerId,
-
-              closedBy:
-                `${interaction.user.tag} (${interaction.user.id})`,
-
-              openedAt,
-
-              closedAt,
-
-              messages
-            });
-
-          const transcriptBuffer =
-            Buffer.from(
-              html,
-              "utf8"
-            );
-
-          if (
-            transcriptBuffer.length >
-            24 * 1024 * 1024
-          ) {
-            throw new Error(
-              "Transcript file is larger than 24 MB."
-            );
-          }
-
-          const safeFileName =
-            sanitizeFileName(
-              interaction.channel.name
-                .toLowerCase()
-            );
-
-          const fileName =
-            `${safeFileName}-${closedAt}.html`;
-
-          const attachment =
-            new AttachmentBuilder(
-              transcriptBuffer,
-              {
-                name:
-                  fileName,
-
-                description:
-                  `HTML transcript for ${interaction.channel.name}`
-              }
-            );
 
           const ownerText =
             metadata.ownerId
@@ -2089,6 +1326,13 @@ client.on(
               )
 
               : "Unknown";
+
+
+
+          /*
+            Transcript kanalındaki
+            kapanış kartı.
+          */
 
           const logEmbed =
             new EmbedBuilder()
@@ -2109,7 +1353,7 @@ client.on(
                     "Ticket",
 
                   value:
-                    `#${interaction.channel.name}`,
+                    `#${ticketChannel.name}`,
 
                   inline:
                     true
@@ -2182,12 +1426,14 @@ client.on(
               })
               .setTimestamp();
 
+
+
           /*
-            Önce ana log mesajı ve
-            HTML yedeği gönderilir.
+            HTML veya başka bir dosya eklenmez.
+            Sadece kapanış kartı gönderilir.
           */
 
-          const logMessage =
+          logMessage =
             await transcriptChannel.send({
               allowedMentions: {
                 parse: []
@@ -2195,24 +1441,21 @@ client.on(
 
               embeds: [
                 logEmbed
-              ],
-
-              files: [
-                attachment
               ]
             });
 
+
+
           /*
-            Ana log mesajının altında
+            Kapanış kartının altında
             Discord transcript thread'i açılır.
           */
 
-          const transcriptThread =
+          transcriptThread =
             await createDiscordThreadTranscript({
               logMessage,
 
-              ticketChannel:
-                interaction.channel,
+              ticketChannel,
 
               ticketType:
                 metadata.type,
@@ -2226,9 +1469,10 @@ client.on(
                 `${interaction.user} (${interaction.user.id})`
             });
 
+
+
           /*
-            Log mesajına thread'e giden
-            doğrudan bağlantı düğmesi eklenir.
+            VIEW TRANSCRIPT düğmesi.
           */
 
           const viewThreadButton =
@@ -2243,8 +1487,12 @@ client.on(
                 ButtonStyle.Link
               )
               .setURL(
-                `https://discord.com/channels/${interaction.guild.id}/${transcriptThread.id}`
+                `https://discord.com/channels/` +
+
+                `${interaction.guild.id}/${transcriptThread.id}`
               );
+
+
 
           await logMessage.edit({
             components: [
@@ -2255,55 +1503,131 @@ client.on(
             ]
           });
 
-          await interaction.editReply({
-            content:
-              "✅ Discord thread and HTML transcript were saved successfully. This ticket will close in 3 seconds."
-          });
 
-          await new Promise(
-            resolve =>
-              setTimeout(
-                resolve,
-                3000
-              )
+
+        } catch (archiveError) {
+          console.error(
+            "Transcript creation error:",
+            archiveError
           );
 
+
+
           /*
-            Thread ve HTML başarıyla kaydedildikten
-            sonra orijinal ticket kanalı silinir.
+            Thread yarım oluşturulduysa temizler.
           */
 
-          await interaction.channel.delete(
-            `Ticket closed by ${interaction.user.tag}`
-          );
+          if (transcriptThread) {
+            await transcriptThread
+              .delete()
+              .catch(
+                () => {}
+              );
+          }
 
-        } catch (error) {
-          console.error(
-            "Transcript or ticket close error:",
-            error
-          );
 
-          closingTickets.delete(
-            interaction.channel.id
-          );
 
           /*
-            Transcript işlemi tamamlanamazsa
+            Log kartı yarım oluşturulduysa temizler.
+          */
+
+          if (logMessage) {
+            await logMessage
+              .delete()
+              .catch(
+                () => {}
+              );
+          }
+
+
+
+          closingTickets.delete(
+            ticketChannelId
+          );
+
+
+
+          /*
+            Transcript tamamlanmadığı için
             ticket kanalı silinmez.
           */
 
           return interaction.editReply({
             content:
-              "❌ The transcript could not be completed, so the ticket was NOT deleted. Check the transcript-channel permissions and Railway logs."
+              "❌ The Discord transcript could not be completed, so the ticket was NOT deleted. Check the transcript-channel permissions and Railway logs."
           });
         }
+
+
+
+        await interaction.editReply({
+          content:
+            "✅ Discord transcript saved successfully. This ticket will close in 3 seconds."
+        });
+
+
+
+        await new Promise(
+          resolve =>
+            setTimeout(
+              resolve,
+              3000
+            )
+        );
+
+
+
+        /*
+          Transcript başarıyla kaydedildikten
+          sonra ticket kanalını siler.
+        */
+
+        try {
+          await ticketChannel.delete(
+            `Ticket closed by ${interaction.user.tag}`
+          );
+
+          closingTickets.delete(
+            ticketChannelId
+          );
+
+        } catch (deleteError) {
+          console.error(
+            "Ticket delete error:",
+            deleteError
+          );
+
+
+
+          closingTickets.delete(
+            ticketChannelId
+          );
+
+
+
+          /*
+            Transcript kaydedilmiş fakat kanal
+            silinememişse bunu bildirir.
+          */
+
+          return interaction.editReply({
+            content:
+              "⚠️ The transcript was saved, but the ticket channel could not be deleted. Check the bot's Manage Channels permission."
+          }).catch(
+            () => {}
+          );
+        }
       }
+
+
 
     } catch (error) {
       console.error(
         "Interaction error:",
         error
       );
+
+
 
       if (interaction.deferred) {
         return interaction.editReply({
@@ -2314,13 +1638,15 @@ client.on(
         );
       }
 
+
+
       if (!interaction.replied) {
         return interaction.reply({
           content:
             "❌ Something went wrong.",
 
-          ephemeral:
-            true
+          flags:
+            MessageFlags.Ephemeral
         }).catch(
           () => {}
         );
