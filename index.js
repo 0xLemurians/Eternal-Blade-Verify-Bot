@@ -24,7 +24,6 @@ const client = new Client({
 });
 
 
-
 // ==================================================
 // IDS
 // ==================================================
@@ -42,7 +41,6 @@ const COLLAB_TRANSCRIPT_CHANNEL_ID =
   "1527352927960698994";
 
 
-
 // ==================================================
 // SETTINGS
 // ==================================================
@@ -58,12 +56,11 @@ const ALLOWED_TICKET_TYPES = [
 ];
 
 /*
-  Aynı ticketın aynı anda iki kez
-  kapatılmasını engeller.
+  Aynı ticketın aynı anda
+  iki kez kapatılmasını engeller.
 */
 
 const closingTickets = new Set();
-
 
 
 // ==================================================
@@ -71,41 +68,127 @@ const closingTickets = new Set();
 // ==================================================
 
 function createTicketPanel() {
+  const ticketPanelEmbed =
+    new EmbedBuilder()
+      .setTitle(
+        "🎫 Eternal Blades Ticket Center"
+      )
+      .setDescription(
+        [
+          "Please select the category that best matches your request.",
+          "",
+          "Our team will review your ticket as soon as possible."
+        ].join("\n")
+      )
+      .setColor(
+        "#ff0000"
+      )
+      .addFields(
+        {
+          name:
+            "✅ Open a ticket for:",
+
+          value:
+            [
+              "• Support issues",
+              "• Technical problems",
+              "• Collaboration requests",
+              "• Partnership proposals"
+            ].join("\n"),
+
+          inline:
+            false
+        },
+
+        {
+          name:
+            "❌ Do not open a ticket for:",
+
+          value:
+            [
+              "• General chat",
+              "• Repeated spam",
+              "• Questions already answered in #announcements or #links",
+              "• Fake or unserious partnership offers",
+              "• Duplicate tickets about the same issue"
+            ].join("\n"),
+
+          inline:
+            false
+        },
+
+        {
+          name:
+            "📌 Before opening a ticket:",
+
+          value:
+            [
+              "• Check #announcements and #links first",
+              "• Choose the correct ticket category",
+              "• Explain your request clearly",
+              "• Keep only one active ticket per category"
+            ].join("\n"),
+
+          inline:
+            false
+        }
+      )
+      .setFooter({
+        text:
+          "Eternal Blades Support System"
+      });
+
+  const ticketSelectMenu =
+    new StringSelectMenuBuilder()
+      .setCustomId(
+        "ticket_select"
+      )
+      .setPlaceholder(
+        "▼ Choose a ticket category"
+      )
+      .addOptions(
+        new StringSelectMenuOptionBuilder()
+          .setLabel(
+            "Support"
+          )
+          .setDescription(
+            "Technical help, questions and support issues."
+          )
+          .setEmoji(
+            "🛠️"
+          )
+          .setValue(
+            "support"
+          ),
+
+        new StringSelectMenuOptionBuilder()
+          .setLabel(
+            "Collaboration"
+          )
+          .setDescription(
+            "Partnerships, proposals and business inquiries."
+          )
+          .setEmoji(
+            "🤝"
+          )
+          .setValue(
+            "collab"
+          )
+      );
+
   return {
     embeds: [
-      new EmbedBuilder()
-        .setTitle("🎫 Open a Ticket")
-        .setDescription(
-          "Select a ticket category below."
-        )
-        .setColor("#ff0000")
+      ticketPanelEmbed
     ],
 
     components: [
-      new ActionRowBuilder().addComponents(
-        new StringSelectMenuBuilder()
-          .setCustomId("ticket_select")
-          .setPlaceholder("▼ Select Menu")
-          .addOptions(
-            new StringSelectMenuOptionBuilder()
-              .setLabel("Support")
-              .setDescription(
-                "Get help from the Eternal Blades team."
-              )
-              .setValue("support"),
-
-            new StringSelectMenuOptionBuilder()
-              .setLabel("Collab")
-              .setDescription(
-                "Contact us for collaborations and partnerships."
-              )
-              .setValue("collab")
-          )
-      )
+      new ActionRowBuilder()
+        .addComponents(
+          ticketSelectMenu
+        )
     ]
   };
 }
-
 
 
 // ==================================================
@@ -116,24 +199,36 @@ function formatDate(timestamp) {
   return new Date(timestamp).toLocaleString(
     "tr-TR",
     {
-      timeZone: "Europe/Istanbul",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
+      timeZone:
+        "Europe/Istanbul",
+
+      year:
+        "numeric",
+
+      month:
+        "2-digit",
+
+      day:
+        "2-digit",
+
+      hour:
+        "2-digit",
+
+      minute:
+        "2-digit",
+
+      second:
+        "2-digit"
     }
   );
 }
 
 
-
 /*
-  Thread adına eklenecek tarih-saat.
+  Thread adına eklenecek tarih ve saat.
 
   Örnek:
-  20260716-203045
+  20260716-211500
 */
 
 function formatThreadTimestamp(timestamp) {
@@ -141,14 +236,29 @@ function formatThreadTimestamp(timestamp) {
     new Intl.DateTimeFormat(
       "en-GB",
       {
-        timeZone: "Europe/Istanbul",
-        year: "numeric",
-        month: "2-digit",
-        day: "2-digit",
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hourCycle: "h23"
+        timeZone:
+          "Europe/Istanbul",
+
+        year:
+          "numeric",
+
+        month:
+          "2-digit",
+
+        day:
+          "2-digit",
+
+        hour:
+          "2-digit",
+
+        minute:
+          "2-digit",
+
+        second:
+          "2-digit",
+
+        hourCycle:
+          "h23"
       }
     ).formatToParts(
       new Date(timestamp)
@@ -174,7 +284,6 @@ function formatThreadTimestamp(timestamp) {
 }
 
 
-
 function truncate(value, maxLength) {
   const text =
     String(value ?? "");
@@ -185,10 +294,12 @@ function truncate(value, maxLength) {
 
   return `${text.slice(
     0,
-    Math.max(0, maxLength - 3)
+    Math.max(
+      0,
+      maxLength - 3
+    )
   )}...`;
 }
-
 
 
 /*
@@ -222,15 +333,17 @@ function parseTicketMetadata(topic = "") {
 
     openedAt:
       openedAtMatch?.[1]
-        ? Number(openedAtMatch[1])
+        ? Number(
+            openedAtMatch[1]
+          )
         : null
   };
 }
 
 
-
 /*
-  Ticket türüne göre kayıt kanalını seçer.
+  Ticket türüne göre
+  transcript kanalını seçer.
 */
 
 function getTranscriptChannelId(type) {
@@ -246,7 +359,6 @@ function getTranscriptChannelId(type) {
 }
 
 
-
 // ==================================================
 // FETCH ALL TICKET MESSAGES
 // ==================================================
@@ -259,10 +371,13 @@ async function fetchAllMessages(channel) {
   while (true) {
     const batch =
       await channel.messages.fetch({
-        limit: 100,
+        limit:
+          100,
 
         ...(before
-          ? { before }
+          ? {
+              before
+            }
           : {})
       });
 
@@ -294,7 +409,6 @@ async function fetchAllMessages(channel) {
 }
 
 
-
 /*
   Botun ticket açılırken gönderdiği
   CLOSE düğmeli ilk mesajı tespit eder.
@@ -308,15 +422,15 @@ function isOpeningBotMessage(message) {
     return false;
   }
 
-  return message.components.some(row =>
-    row.components.some(
-      component =>
-        component.customId ===
-        "close_ticket"
-    )
+  return message.components.some(
+    row =>
+      row.components.some(
+        component =>
+          component.customId ===
+          "close_ticket"
+      )
   );
 }
-
 
 
 // ==================================================
@@ -330,7 +444,6 @@ function getMessageDisplayName(message) {
     message.author.username
   );
 }
-
 
 
 /*
@@ -374,9 +487,10 @@ function getOriginalEmbedText(message) {
     }
   }
 
-  return parts.join("\n\n");
+  return parts.join(
+    "\n\n"
+  );
 }
-
 
 
 /*
@@ -393,9 +507,10 @@ function getStickerText(message) {
       sticker =>
         `Sticker: ${sticker.name} — ${sticker.url}`
     )
-    .join("\n");
+    .join(
+      "\n"
+    );
 }
-
 
 
 /*
@@ -421,9 +536,10 @@ function getAttachmentLinksText(message) {
         );
       }
     )
-    .join("\n");
+    .join(
+      "\n"
+    );
 }
-
 
 
 /*
@@ -480,8 +596,11 @@ function buildThreadEmbed(
 
   const description =
     truncate(
-      sections.join("\n\n") ||
+      sections.join(
+        "\n\n"
+      ) ||
       "*Mesaj içeriği yok.*",
+
       4000
     );
 
@@ -496,14 +615,18 @@ function buildThreadEmbed(
               ? " • BOT"
               : ""
           }`,
+
           256
         ),
 
       iconURL:
         message.author
           .displayAvatarURL({
-            extension: "png",
-            size: 64
+            extension:
+              "png",
+
+            size:
+              64
           })
     })
     .setDescription(
@@ -512,17 +635,10 @@ function buildThreadEmbed(
     .setColor(
       "#ff0000"
     )
-
-    /*
-      Original message ID kaldırıldı.
-      Yalnızca Discord'un normal tarih bilgisi görünür.
-    */
-
     .setTimestamp(
       message.createdAt
     );
 }
-
 
 
 /*
@@ -586,12 +702,12 @@ async function copyMessageToThread(
 }
 
 
-
 /*
-  Log kartının altında transcript thread'i açar.
+  Kapanış kartının altında
+  transcript thread'i oluşturur.
 
-  Thread adı:
-  collab-kullanici-123456-20260716-203045
+  Örnek thread adı:
+  collab-kullanici-123456-20260716-211500
 */
 
 async function createDiscordThreadTranscript({
@@ -624,11 +740,10 @@ async function createDiscordThreadTranscript({
     });
 
   /*
-    Ekstra Support Transcript veya
-    Collab Transcript kartı gönderilmez.
+    Ekstra özet kartı gönderilmez.
 
-    Discord ana kapanış kartını thread'in
-    üstünde zaten otomatik gösterir.
+    Discord kapanış kartını thread'in
+    üstünde otomatik gösterir.
   */
 
   for (const message of messages) {
@@ -640,7 +755,6 @@ async function createDiscordThreadTranscript({
 
   return thread;
 }
-
 
 
 // ==================================================
@@ -673,19 +787,19 @@ client.once(
       }
 
       /*
-        Son 100 mesaj içinde mevcut
-        ticket panelini arar.
+        Son 100 mesaj içindeki
+        mevcut ticket panelini arar.
       */
 
       const recentMessages =
         await ticketPanelChannel.messages.fetch({
-          limit: 100
+          limit:
+            100
         });
 
       const existingPanels =
         recentMessages.filter(
           message =>
-
             message.author.id ===
               client.user.id &&
 
@@ -701,14 +815,15 @@ client.once(
 
       /*
         Panel varsa günceller.
-        Fazladan panel varsa siler.
+
+        Birden fazla panel varsa
+        fazlalıkları siler.
       */
 
       if (existingPanels.size > 0) {
-        const panels =
-          [
-            ...existingPanels.values()
-          ];
+        const panels = [
+          ...existingPanels.values()
+        ];
 
         const panelToKeep =
           panels[0];
@@ -758,7 +873,6 @@ client.once(
     }
   }
 );
-
 
 
 // ==================================================
@@ -817,7 +931,6 @@ client.on(
         const existingTicket =
           interaction.guild.channels.cache.find(
             channel =>
-
               channel.type ===
                 ChannelType.GuildText &&
 
@@ -856,6 +969,7 @@ client.on(
         const ticketName =
           `${type}-${usernamePart}-` +
           `${interaction.user.id.slice(-6)}`;
+
 
         // ==============================================
         // TICKET CHANNEL PERMISSIONS
@@ -936,6 +1050,7 @@ client.on(
           }
         ];
 
+
         // ==============================================
         // STAFF ACCESS
         // ==============================================
@@ -985,6 +1100,7 @@ client.on(
           }
         }
 
+
         // ==============================================
         // CREATE TICKET CHANNEL
         // ==============================================
@@ -1005,11 +1121,8 @@ client.on(
 
             topic:
               `Ticket Owner: ${interaction.user.tag} | ` +
-
               `User ID: ${interaction.user.id} | ` +
-
               `Type: ${type} | ` +
-
               `Opened At: ${openedAt}`,
 
             permissionOverwrites,
@@ -1017,6 +1130,7 @@ client.on(
             reason:
               `${type} ticket opened by ${interaction.user.tag}`
           });
+
 
         // ==============================================
         // CLOSE BUTTON
@@ -1028,7 +1142,7 @@ client.on(
               "close_ticket"
             )
             .setLabel(
-              "CLOSE"
+              "CLOSE TICKET"
             )
             .setEmoji(
               "🗑️"
@@ -1037,25 +1151,125 @@ client.on(
               ButtonStyle.Danger
             );
 
-        const ticketTitle =
-          type === "support"
-            ? "🎫 SUPPORT Ticket"
-            : "🤝 COLLAB Ticket";
 
-        const ticketDescription =
-          type === "support"
+        // ==============================================
+        // SUPPORT TICKET MESSAGE
+        // ==============================================
 
-            ? (
-              "Please explain the issue " +
-              "you need help with.\n\n" +
-              "Our team will assist you shortly."
+        const supportEmbed =
+          new EmbedBuilder()
+            .setTitle(
+              "🎫 SUPPORT TICKET"
             )
+            .setDescription(
+              [
+                "Welcome to Eternal Blades Support.",
+                "",
+                "Please explain your issue clearly and provide any useful details or screenshots.",
+                "",
+                "A team member will assist you shortly."
+              ].join("\n")
+            )
+            .setColor(
+              "#ff0000"
+            )
+            .addFields(
+              {
+                name:
+                  "📌 Please include:",
 
-            : (
-              "Please introduce your project " +
-              "and explain your collaboration proposal.\n\n" +
-              "Our team will review it shortly."
-            );
+                value:
+                  [
+                    "• A clear explanation of the problem",
+                    "• Screenshots or relevant files",
+                    "• The steps that caused the issue",
+                    "• Any other useful information"
+                  ].join("\n"),
+
+                inline:
+                  false
+              },
+
+              {
+                name:
+                  "⏳ Response time",
+
+                value:
+                  "Please remain patient and avoid repeatedly mentioning staff members.",
+
+                inline:
+                  false
+              }
+            )
+            .setFooter({
+              text:
+                "Only authorized staff members can close this ticket."
+            })
+            .setTimestamp();
+
+
+        // ==============================================
+        // COLLAB TICKET MESSAGE
+        // ==============================================
+
+        const collabEmbed =
+          new EmbedBuilder()
+            .setTitle(
+              "🤝 COLLABORATION TICKET"
+            )
+            .setDescription(
+              [
+                "Welcome to the Eternal Blades Collaboration Desk.",
+                "",
+                "Please introduce your project and explain what kind of collaboration you are proposing.",
+                "",
+                "Our team will review your request shortly."
+              ].join("\n")
+            )
+            .setColor(
+              "#ff0000"
+            )
+            .addFields(
+              {
+                name:
+                  "📋 Please include:",
+
+                value:
+                  [
+                    "• Project or community name",
+                    "• Official website and social links",
+                    "• Community size and activity",
+                    "• Your proposed collaboration",
+                    "• What both communities will gain"
+                  ].join("\n"),
+
+                inline:
+                  false
+              },
+
+              {
+                name:
+                  "⚠️ Important",
+
+                value:
+                  "Fake, incomplete or unserious partnership offers may be closed without a response.",
+
+                inline:
+                  false
+              }
+            )
+            .setFooter({
+              text:
+                "Only authorized staff members can close this ticket."
+            })
+            .setTimestamp();
+
+
+        const selectedTicketEmbed =
+          type === "support"
+            ? supportEmbed
+            : collabEmbed;
+
 
         await ticketChannel.send({
           content:
@@ -1068,21 +1282,7 @@ client.on(
           },
 
           embeds: [
-            new EmbedBuilder()
-              .setTitle(
-                ticketTitle
-              )
-              .setDescription(
-                ticketDescription
-              )
-              .setColor(
-                "#ff0000"
-              )
-              .setFooter({
-                text:
-                  "Eternal Blades Support"
-              })
-              .setTimestamp()
+            selectedTicketEmbed
           ],
 
           components: [
@@ -1093,12 +1293,12 @@ client.on(
           ]
         });
 
+
         return interaction.editReply({
           content:
             `✅ Ticket created: ${ticketChannel}`
         });
       }
-
 
 
       // ==============================================
@@ -1124,8 +1324,8 @@ client.on(
         }
 
         /*
-          Düğmeye basan kişinin güncel
-          rollerini Discord'dan çeker.
+          Düğmeye basan kişinin
+          güncel rollerini çeker.
         */
 
         const member =
@@ -1142,7 +1342,8 @@ client.on(
           );
 
         /*
-          Ticketı yalnız yetkililer kapatabilir.
+          Ticketı yalnızca
+          yetkililer kapatabilir.
         */
 
         if (!isStaff) {
@@ -1202,7 +1403,6 @@ client.on(
 
           if (
             !metadata.type ||
-
             !ALLOWED_TICKET_TYPES.includes(
               metadata.type
             )
@@ -1230,7 +1430,6 @@ client.on(
 
           if (
             !transcriptChannel ||
-
             !transcriptChannel.isTextBased()
           ) {
             throw new Error(
@@ -1239,7 +1438,7 @@ client.on(
           }
 
           /*
-            Bütün ticket mesajlarını toplar.
+            Ticket mesajlarını toplar.
           */
 
           const allMessages =
@@ -1248,8 +1447,8 @@ client.on(
             );
 
           /*
-            Botun CLOSE düğmeli açılış kartını
-            transcript mesajlarından çıkarır.
+            CLOSE düğmeli açılış mesajını
+            transcript içinden çıkarır.
           */
 
           const transcriptMessages =
@@ -1265,32 +1464,26 @@ client.on(
 
           const openedAt =
             metadata.openedAt ||
-
-            ticketChannel
-              .createdTimestamp;
+            ticketChannel.createdTimestamp;
 
           const ownerText =
             metadata.ownerId
-
               ? (
-                `<@${metadata.ownerId}> ` +
-                `(${metadata.ownerId})`
-              )
-
+                  `<@${metadata.ownerId}> ` +
+                  `(${metadata.ownerId})`
+                )
               : "Unknown";
 
-          /*
-            Transcript kanalındaki
-            tek kapanış kartı.
-          */
+
+          // ==============================================
+          // TRANSCRIPT LOG EMBED
+          // ==============================================
 
           const logEmbed =
             new EmbedBuilder()
               .setTitle(
                 metadata.type === "support"
-
                   ? "🎫 Support Ticket Closed"
-
                   : "🤝 Collab Ticket Closed"
               )
               .setColor(
@@ -1375,10 +1568,6 @@ client.on(
               })
               .setTimestamp();
 
-          /*
-            HTML veya TXT gönderilmez.
-            Yalnız kapanış kartı gönderilir.
-          */
 
           logMessage =
             await transcriptChannel.send({
@@ -1391,9 +1580,10 @@ client.on(
               ]
             });
 
+
           /*
-            Tarih-saat içeren benzersiz
-            transcript thread'i açılır.
+            Benzersiz isimli transcript
+            thread'i oluşturulur.
           */
 
           transcriptThread =
@@ -1408,9 +1598,6 @@ client.on(
               closedAt
             });
 
-          /*
-            Thread'e giden buton.
-          */
 
           const viewThreadButton =
             new ButtonBuilder()
@@ -1425,9 +1612,9 @@ client.on(
               )
               .setURL(
                 `https://discord.com/channels/` +
-
                 `${interaction.guild.id}/${transcriptThread.id}`
               );
+
 
           await logMessage.edit({
             components: [
@@ -1444,10 +1631,6 @@ client.on(
             archiveError
           );
 
-          /*
-            Thread yarım oluşturulduysa temizler.
-          */
-
           if (transcriptThread) {
             await transcriptThread
               .delete()
@@ -1455,10 +1638,6 @@ client.on(
                 () => {}
               );
           }
-
-          /*
-            Kapanış kartı yarım oluşturulduysa temizler.
-          */
 
           if (logMessage) {
             await logMessage
@@ -1472,21 +1651,18 @@ client.on(
             ticketChannelId
           );
 
-          /*
-            Transcript tamamlanmadığı için
-            ticket kanalı silinmez.
-          */
-
           return interaction.editReply({
             content:
               "❌ The Discord transcript could not be completed, so the ticket was NOT deleted. Check the transcript-channel permissions and Railway logs."
           });
         }
 
+
         await interaction.editReply({
           content:
             "✅ Discord transcript saved successfully. This ticket will close in 3 seconds."
         });
+
 
         await new Promise(
           resolve =>
@@ -1496,9 +1672,10 @@ client.on(
             )
         );
 
+
         /*
           Transcript başarıyla oluşturulduktan
-          sonra ticket kanalını siler.
+          sonra ticket kanalı silinir.
         */
 
         try {
@@ -1558,7 +1735,6 @@ client.on(
     }
   }
 );
-
 
 
 // ==================================================
