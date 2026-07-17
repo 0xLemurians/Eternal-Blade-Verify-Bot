@@ -3,32 +3,21 @@ import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ChannelType
+  ChannelType,
+  PermissionsBitField
 } from "discord.js";
-
 
 
 // ==================================================
 // LINKS PANEL SETTINGS
 // ==================================================
 
-/*
-  Discord'daki #links kanalına sağ tıkla:
-  Kanal Kimliğini Kopyala
-
-  Sonra aşağıdaki tırnakların içine yapıştır.
-*/
-
 const LINKS_CHANNEL_ID =
   "1506653753569447956";
 
-
-
 /*
-  Linkler hazır olduğunda aşağıdaki alanlara ekle.
-
-  Link henüz hazır değilse boş bırak:
-  const WEBSITE_URL = "";
+  Add the official links later.
+  Empty values safely display "Coming Soon".
 */
 
 const WEBSITE_URL =
@@ -40,26 +29,11 @@ const TWITTER_URL =
 const DISCORD_INVITE_URL =
   "";
 
-
-
-/*
-  Mevcut open-ticket kanalının ID'si.
-  Bunu değiştirmene gerek yok.
-*/
-
 const OPEN_TICKET_CHANNEL_ID =
   "1506778989736493106";
 
-
-
-/*
-  Botun daha önce gönderdiği paneli
-  tanımak için kullanılan sabit başlık.
-*/
-
 const LINKS_PANEL_TITLE =
   "🔗 Eternal Blades Official Links";
-
 
 
 // ==================================================
@@ -86,7 +60,6 @@ function isValidUrl(value) {
 }
 
 
-
 function createLinkField({
   configuredUrl,
   linkText,
@@ -99,6 +72,108 @@ function createLinkField({
   return comingSoonText;
 }
 
+
+async function fetchAllMessages(channel) {
+  const messages = [];
+
+  let before;
+
+  while (true) {
+    const batch =
+      await channel.messages.fetch({
+        limit:
+          100,
+
+        ...(before
+          ? {
+              before
+            }
+          : {})
+      });
+
+    if (batch.size === 0) {
+      break;
+    }
+
+    messages.push(
+      ...batch.values()
+    );
+
+    before =
+      batch.last().id;
+
+    if (batch.size < 100) {
+      break;
+    }
+  }
+
+  return messages.sort(
+    (first, second) =>
+      first.createdTimestamp -
+      second.createdTimestamp
+  );
+}
+
+
+async function assertLinksChannelPermissions(
+  channel
+) {
+  const botMember =
+    channel.guild.members.me ||
+    await channel.guild.members.fetchMe();
+
+  const permissions =
+    channel.permissionsFor(
+      botMember
+    );
+
+  const requiredPermissions = [
+    {
+      flag:
+        PermissionsBitField.Flags.ViewChannel,
+      name:
+        "View Channel"
+    },
+    {
+      flag:
+        PermissionsBitField.Flags.SendMessages,
+      name:
+        "Send Messages"
+    },
+    {
+      flag:
+        PermissionsBitField.Flags.EmbedLinks,
+      name:
+        "Embed Links"
+    },
+    {
+      flag:
+        PermissionsBitField.Flags.ReadMessageHistory,
+      name:
+        "Read Message History"
+    }
+  ];
+
+  const missingPermissions =
+    requiredPermissions.filter(
+      permission =>
+        !permissions?.has(
+          permission.flag
+        )
+    );
+
+  if (missingPermissions.length > 0) {
+    throw new Error(
+      "Links channel is missing bot permissions: " +
+      missingPermissions
+        .map(
+          permission =>
+            permission.name
+        )
+        .join(", ")
+    );
+  }
+}
 
 
 // ==================================================
@@ -118,8 +193,6 @@ function createLinksPanel(client) {
         "Coming Soon"
     });
 
-
-
   const twitterField =
     createLinkField({
       configuredUrl:
@@ -132,8 +205,6 @@ function createLinksPanel(client) {
         "Coming Soon"
     });
 
-
-
   const discordField =
     createLinkField({
       configuredUrl:
@@ -145,8 +216,6 @@ function createLinksPanel(client) {
       comingSoonText:
         "Coming Soon"
     });
-
-
 
   const embed =
     new EmbedBuilder()
@@ -222,18 +291,7 @@ function createLinksPanel(client) {
           "Eternal Blades • Official Channels"
       });
 
-
-
-  /*
-    Geçerli olan linkler için embed'in altında
-    tıklanabilir Discord butonları oluşturur.
-
-    Link boş bırakılmışsa o buton gösterilmez.
-  */
-
   const linkButtons = [];
-
-
 
   if (isValidUrl(WEBSITE_URL)) {
     linkButtons.push(
@@ -253,8 +311,6 @@ function createLinksPanel(client) {
     );
   }
 
-
-
   if (isValidUrl(TWITTER_URL)) {
     linkButtons.push(
       new ButtonBuilder()
@@ -272,8 +328,6 @@ function createLinksPanel(client) {
         )
     );
   }
-
-
 
   if (isValidUrl(DISCORD_INVITE_URL)) {
     linkButtons.push(
@@ -293,8 +347,6 @@ function createLinksPanel(client) {
     );
   }
 
-
-
   const components =
     linkButtons.length > 0
       ? [
@@ -304,8 +356,6 @@ function createLinksPanel(client) {
             )
         ]
       : [];
-
-
 
   return {
     embeds: [
@@ -321,7 +371,6 @@ function createLinksPanel(client) {
 }
 
 
-
 // ==================================================
 // SETUP LINKS PANEL
 // ==================================================
@@ -330,11 +379,6 @@ export async function setupLinksPanel(
   client
 ) {
   try {
-
-    /*
-      Kanal ID henüz eklenmediyse botu çökertmez.
-    */
-
     if (
       !LINKS_CHANNEL_ID ||
       LINKS_CHANNEL_ID.includes(
@@ -348,49 +392,35 @@ export async function setupLinksPanel(
       return;
     }
 
-
-
     const linksChannel =
       await client.channels.fetch(
         LINKS_CHANNEL_ID
       );
-
-
 
     if (
       !linksChannel ||
       linksChannel.type !==
         ChannelType.GuildText
     ) {
-      console.error(
-        "Links panel channel was not found or is not a text channel."
+      throw new Error(
+        "Links panel channel was not found or is not a guild text channel."
       );
-
-      return;
     }
 
+    await assertLinksChannelPermissions(
+      linksChannel
+    );
 
+    const allMessages =
+      await fetchAllMessages(
+        linksChannel
+      );
 
-    /*
-      Son 100 mesajda daha önce gönderilmiş
-      Eternal Blades link panelini arar.
-    */
-
-    const recentMessages =
-      await linksChannel.messages.fetch({
-        limit:
-          100
-      });
-
-
-
-    const existingPanels =
-      recentMessages.filter(
+    const panels =
+      allMessages.filter(
         message =>
-
           message.author.id ===
             client.user.id &&
-
           message.embeds.some(
             embed =>
               embed.title ===
@@ -398,24 +428,9 @@ export async function setupLinksPanel(
           )
       );
 
-
-
-    /*
-      Panel daha önce gönderilmişse
-      yeni mesaj oluşturmak yerine günceller.
-    */
-
-    if (existingPanels.size > 0) {
-      const panels = [
-        ...existingPanels.values()
-      ];
-
-
-
+    if (panels.length > 0) {
       const panelToKeep =
-        panels[0];
-
-
+        panels.at(-1);
 
       await panelToKeep.edit(
         createLinksPanel(
@@ -423,56 +438,39 @@ export async function setupLinksPanel(
         )
       );
 
-
-
       console.log(
         "Existing links panel updated."
       );
 
-
-
-      /*
-        Yanlışlıkla birden fazla panel oluşmuşsa
-        fazlalıkları otomatik olarak siler.
-      */
-
       for (
         const duplicatePanel
-        of panels.slice(1)
+        of panels.slice(0, -1)
       ) {
-        try {
-          await duplicatePanel.delete();
-
-          console.log(
-            "Duplicate links panel deleted."
+        await duplicatePanel
+          .delete()
+          .then(
+            () =>
+              console.log(
+                "Duplicate links panel deleted."
+              )
+          )
+          .catch(
+            error =>
+              console.error(
+                "Duplicate links panel delete error:",
+                error
+              )
           );
-
-        } catch (deleteError) {
-          console.error(
-            "Duplicate links panel delete error:",
-            deleteError
-          );
-        }
       }
-
-
 
       return;
     }
-
-
-
-    /*
-      Daha önce panel yoksa ilk kez gönderir.
-    */
 
     await linksChannel.send(
       createLinksPanel(
         client
       )
     );
-
-
 
     console.log(
       "New links panel sent."
