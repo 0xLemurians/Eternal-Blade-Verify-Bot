@@ -18,6 +18,10 @@ import {
   setupLinksPanel
 } from "./panels/linksPanel.js";
 
+import {
+  upsertPanelMessage
+} from "./utils/panelMessage.js";
+
 
 // ==================================================
 // DISCORD CLIENT
@@ -39,6 +43,10 @@ const client = new Client({
 
 const OPEN_TICKET_CHANNEL_ID =
   "1506778989736493106";
+
+const TICKET_PANEL_MESSAGE_ID =
+  process.env.TICKET_PANEL_MESSAGE_ID
+    ?.trim() || "";
 
 const SUPPORT_CATEGORY_ID =
   "1506778963392069734";
@@ -394,10 +402,10 @@ async function validateStaffRoles(guild) {
 
 
 // ==================================================
-// FETCH ALL MESSAGES
+// FETCH ALL TICKET MESSAGES
 // ==================================================
 
-async function fetchAllMessages(channel) {
+async function fetchAllTicketMessages(channel) {
   const messages = [];
 
   let before;
@@ -619,13 +627,20 @@ async function setupTicketPanel() {
       "Ticket panel channel"
     );
 
-    const allMessages =
-      await fetchAllMessages(
-        ticketPanelChannel
-      );
+    await upsertPanelMessage({
+      channel:
+        ticketPanelChannel,
 
-    const panels =
-      allMessages.filter(
+      configuredMessageId:
+        TICKET_PANEL_MESSAGE_ID,
+
+      environmentVariableName:
+        "TICKET_PANEL_MESSAGE_ID",
+
+      panelName:
+        "Ticket panel",
+
+      isExpectedPanel:
         message =>
           message.author.id ===
             client.user.id &&
@@ -636,52 +651,12 @@ async function setupTicketPanel() {
                   component.customId ===
                   "ticket_select"
               )
-          )
-      );
+          ),
 
-    if (panels.length > 0) {
-      const panelToKeep =
-        panels.at(-1);
-
-      await panelToKeep.edit(
-        createTicketPanel()
-      );
-
-      console.log(
-        "Existing ticket panel updated."
-      );
-
-      for (
-        const duplicatePanel
-        of panels.slice(0, -1)
-      ) {
-        await duplicatePanel
-          .delete()
-          .then(
-            () =>
-              console.log(
-                "Duplicate ticket panel deleted."
-              )
-          )
-          .catch(
-            error =>
-              console.error(
-                "Duplicate ticket panel delete error:",
-                error
-              )
-          );
-      }
-
-      return;
-    }
-
-    await ticketPanelChannel.send(
-      createTicketPanel()
-    );
-
-    console.log(
-      "New ticket panel sent."
-    );
+      buildPayload:
+        () =>
+          createTicketPanel()
+    });
 
   } catch (error) {
     console.error(
@@ -1694,7 +1669,7 @@ async function handleTicketClose(
     );
 
     const allMessages =
-      await fetchAllMessages(
+      await fetchAllTicketMessages(
         ticketChannel
       );
 
