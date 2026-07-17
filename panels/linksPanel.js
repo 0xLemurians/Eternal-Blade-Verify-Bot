@@ -25,7 +25,7 @@ const LINKS_CHANNEL_ID =
 */
 
 const WEBSITE_URL =
-  "";
+  "https://x.com/S1Y4HS4NC4KS";
 
 const TWITTER_URL =
   "";
@@ -210,7 +210,7 @@ function createLinksPanel(client) {
       .addFields(
         {
           name:
-            "🌐 Website",
+            " Website",
 
           value:
             websiteField,
@@ -221,7 +221,7 @@ function createLinksPanel(client) {
 
         {
           name:
-            "🐦 Twitter / X",
+            " Twitter / X",
 
           value:
             twitterField,
@@ -232,7 +232,7 @@ function createLinksPanel(client) {
 
         {
           name:
-            "💬 Discord",
+            " Discord",
 
           value:
             discordField,
@@ -284,7 +284,7 @@ function createLinksPanel(client) {
           "Twitter / X"
         )
         .setEmoji(
-          "🐦"
+          ""
         )
         .setStyle(
           ButtonStyle.Link
@@ -302,7 +302,7 @@ function createLinksPanel(client) {
           "Discord"
         )
         .setEmoji(
-          "💬"
+          ""
         )
         .setStyle(
           ButtonStyle.Link
