@@ -14,6 +14,15 @@ import {
   MessageFlags
 } from "discord.js";
 
+import {
+  setupLinksPanel
+} from "./panels/linksPanel.js";
+
+
+// ==================================================
+// DISCORD CLIENT
+// ==================================================
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -25,7 +34,7 @@ const client = new Client({
 
 
 // ==================================================
-// IDS
+// CHANNEL IDS
 // ==================================================
 
 const OPEN_TICKET_CHANNEL_ID =
@@ -56,8 +65,8 @@ const ALLOWED_TICKET_TYPES = [
 ];
 
 /*
-  Aynı ticketın aynı anda
-  iki kez kapatılmasını engeller.
+  Bir ticketın aynı anda iki defa
+  kapatılmasını engeller.
 */
 
 const closingTickets = new Set();
@@ -225,10 +234,11 @@ function formatDate(timestamp) {
 
 
 /*
-  Thread adına eklenecek tarih ve saat.
+  Transcript thread adına eklenecek
+  benzersiz tarih ve saat.
 
   Örnek:
-  20260716-211500
+  20260717-145500
 */
 
 function formatThreadTimestamp(timestamp) {
@@ -303,8 +313,14 @@ function truncate(value, maxLength) {
 
 
 /*
-  Ticket kanalının konusundaki
-  kullanıcı, tür ve açılış tarihini okur.
+  Ticket kanal konusundaki bilgileri okur.
+
+  Örnek kanal konusu:
+
+  Ticket Owner: username
+  User ID: 123456
+  Type: support
+  Opened At: 1784300000000
 */
 
 function parseTicketMetadata(topic = "") {
@@ -342,8 +358,8 @@ function parseTicketMetadata(topic = "") {
 
 
 /*
-  Ticket türüne göre
-  transcript kanalını seçer.
+  Ticket türüne göre transcript
+  kanalını seçer.
 */
 
 function getTranscriptChannelId(type) {
@@ -410,8 +426,10 @@ async function fetchAllMessages(channel) {
 
 
 /*
-  Botun ticket açılırken gönderdiği
-  CLOSE düğmeli ilk mesajı tespit eder.
+  Ticket açıldığında botun gönderdiği
+  CLOSE TICKET düğmeli başlangıç kartını bulur.
+
+  Bu mesaj transcript içine alınmaz.
 */
 
 function isOpeningBotMessage(message) {
@@ -447,8 +465,8 @@ function getMessageDisplayName(message) {
 
 
 /*
-  Orijinal mesajdaki embed içeriğini
-  okunabilir metne dönüştürür.
+  Bir kullanıcının gönderdiği embed
+  içeriklerini okunabilir metne çevirir.
 */
 
 function getOriginalEmbedText(message) {
@@ -494,7 +512,8 @@ function getOriginalEmbedText(message) {
 
 
 /*
-  Sticker bilgisini transcript içine ekler.
+  Sticker bilgilerini transcript
+  içine ekler.
 */
 
 function getStickerText(message) {
@@ -514,8 +533,8 @@ function getStickerText(message) {
 
 
 /*
-  Görsel veya dosya yeniden yüklenemezse
-  bağlantıları metin olarak ekler.
+  Görsel veya dosya Discord'a yeniden
+  yüklenemezse bağlantısını gösterir.
 */
 
 function getAttachmentLinksText(message) {
@@ -543,8 +562,8 @@ function getAttachmentLinksText(message) {
 
 
 /*
-  Orijinal mesajı Discord thread'i
-  için temiz bir karta dönüştürür.
+  Orijinal Discord mesajını transcript
+  thread'i için temiz bir embed'e dönüştürür.
 */
 
 function buildThreadEmbed(
@@ -642,10 +661,10 @@ function buildThreadEmbed(
 
 
 /*
-  Mesajı transcript thread'ine aktarır.
+  Ticket mesajını transcript thread'ine aktarır.
 
-  Görsel veya dosyaları yeniden yükler.
-  Yükleme başarısız olursa bağlantı ekler.
+  Görsel ve dosyaları yeniden yükler.
+  Yükleme başarısız olursa bağlantılarını gösterir.
 */
 
 async function copyMessageToThread(
@@ -703,11 +722,12 @@ async function copyMessageToThread(
 
 
 /*
-  Kapanış kartının altında
+  Ticket kapanış kartının altında
   transcript thread'i oluşturur.
 
-  Örnek thread adı:
-  collab-kullanici-123456-20260716-211500
+  Thread adı örneği:
+
+  support-username-123456-20260717-145500
 */
 
 async function createDiscordThreadTranscript({
@@ -740,10 +760,10 @@ async function createDiscordThreadTranscript({
     });
 
   /*
-    Ekstra özet kartı gönderilmez.
+    Ekstra ikinci bir özet kartı gönderilmez.
 
     Discord kapanış kartını thread'in
-    üstünde otomatik gösterir.
+    üstünde zaten otomatik gösterir.
   */
 
   for (const message of messages) {
@@ -754,6 +774,121 @@ async function createDiscordThreadTranscript({
   }
 
   return thread;
+}
+
+
+// ==================================================
+// TICKET PANEL SETUP
+// ==================================================
+
+async function setupTicketPanel() {
+  try {
+    const ticketPanelChannel =
+      await client.channels.fetch(
+        OPEN_TICKET_CHANNEL_ID
+      );
+
+    if (
+      !ticketPanelChannel ||
+      !ticketPanelChannel.isTextBased()
+    ) {
+      console.error(
+        "Ticket panel channel was not found."
+      );
+
+      return;
+    }
+
+    /*
+      Son 100 mesaj içinde mevcut
+      ticket panelini arar.
+    */
+
+    const recentMessages =
+      await ticketPanelChannel.messages.fetch({
+        limit:
+          100
+      });
+
+    const existingPanels =
+      recentMessages.filter(
+        message =>
+          message.author.id ===
+            client.user.id &&
+
+          message.components.some(
+            row =>
+              row.components.some(
+                component =>
+                  component.customId ===
+                  "ticket_select"
+              )
+          )
+      );
+
+    /*
+      Panel varsa günceller.
+
+      Yanlışlıkla birden fazla panel oluşmuşsa
+      fazladan olanları siler.
+    */
+
+    if (existingPanels.size > 0) {
+      const panels = [
+        ...existingPanels.values()
+      ];
+
+      const panelToKeep =
+        panels[0];
+
+      await panelToKeep.edit(
+        createTicketPanel()
+      );
+
+      console.log(
+        "Existing ticket panel updated."
+      );
+
+      for (
+        const duplicatePanel
+        of panels.slice(1)
+      ) {
+        try {
+          await duplicatePanel.delete();
+
+          console.log(
+            "Duplicate ticket panel deleted."
+          );
+
+        } catch (deleteError) {
+          console.error(
+            "Duplicate ticket panel delete error:",
+            deleteError
+          );
+        }
+      }
+
+      return;
+    }
+
+    /*
+      Daha önce panel yoksa yenisini gönderir.
+    */
+
+    await ticketPanelChannel.send(
+      createTicketPanel()
+    );
+
+    console.log(
+      "New ticket panel sent."
+    );
+
+  } catch (error) {
+    console.error(
+      "Ticket panel setup error:",
+      error
+    );
+  }
 }
 
 
@@ -769,108 +904,23 @@ client.once(
       `${client.user.tag} online!`
     );
 
-    try {
-      const ticketPanelChannel =
-        await client.channels.fetch(
-          OPEN_TICKET_CHANNEL_ID
-        );
+    /*
+      #links kanalındaki Official Links
+      panelini kurar veya günceller.
 
-      if (
-        !ticketPanelChannel ||
-        !ticketPanelChannel.isTextBased()
-      ) {
-        console.error(
-          "Ticket panel channel was not found."
-        );
+      Kod panels/linksPanel.js
+      dosyasından çalışır.
+    */
 
-        return;
-      }
+    await setupLinksPanel(
+      client
+    );
 
-      /*
-        Son 100 mesaj içindeki
-        mevcut ticket panelini arar.
-      */
+    /*
+      Ticket panelini kurar veya günceller.
+    */
 
-      const recentMessages =
-        await ticketPanelChannel.messages.fetch({
-          limit:
-            100
-        });
-
-      const existingPanels =
-        recentMessages.filter(
-          message =>
-            message.author.id ===
-              client.user.id &&
-
-            message.components.some(
-              row =>
-                row.components.some(
-                  component =>
-                    component.customId ===
-                    "ticket_select"
-                )
-            )
-        );
-
-      /*
-        Panel varsa günceller.
-
-        Birden fazla panel varsa
-        fazlalıkları siler.
-      */
-
-      if (existingPanels.size > 0) {
-        const panels = [
-          ...existingPanels.values()
-        ];
-
-        const panelToKeep =
-          panels[0];
-
-        await panelToKeep.edit(
-          createTicketPanel()
-        );
-
-        console.log(
-          "Existing ticket panel updated."
-        );
-
-        for (
-          const duplicatePanel
-          of panels.slice(1)
-        ) {
-          try {
-            await duplicatePanel.delete();
-
-            console.log(
-              "Duplicate ticket panel deleted."
-            );
-
-          } catch (error) {
-            console.error(
-              "Duplicate panel delete error:",
-              error
-            );
-          }
-        }
-
-      } else {
-        await ticketPanelChannel.send(
-          createTicketPanel()
-        );
-
-        console.log(
-          "New ticket panel sent."
-        );
-      }
-
-    } catch (error) {
-      console.error(
-        "Ticket panel setup error:",
-        error
-      );
-    }
+    await setupTicketPanel();
   }
 );
 
@@ -897,7 +947,7 @@ client.on(
         if (!interaction.guild) {
           return interaction.reply({
             content:
-              "❌ This command can only be used in a server.",
+              "❌ This action can only be used in a server.",
 
             flags:
               MessageFlags.Ephemeral
@@ -924,8 +974,8 @@ client.on(
         }
 
         /*
-          Kullanıcının aynı kategoride
-          açık ticketı olup olmadığını kontrol eder.
+          Kullanıcının aynı türde
+          açık ticketı var mı kontrol eder.
         */
 
         const existingTicket =
@@ -977,7 +1027,10 @@ client.on(
 
         const permissionOverwrites = [
 
-          // @everyone ticket kanalını göremez
+          /*
+            @everyone ticket kanalını göremez.
+          */
+
           {
             id:
               interaction.guild.id,
@@ -989,7 +1042,10 @@ client.on(
             ]
           },
 
-          // Eternal Blades botu
+          /*
+            Eternal Blades botunun izinleri.
+          */
+
           {
             id:
               client.user.id,
@@ -1021,7 +1077,10 @@ client.on(
             ]
           },
 
-          // Ticketı açan kullanıcı
+          /*
+            Ticketı açan kullanıcının izinleri.
+          */
+
           {
             id:
               interaction.user.id,
@@ -1294,10 +1353,34 @@ client.on(
         });
 
 
-        return interaction.editReply({
+        /*
+          Ticket oluşturuldu mesajını gösterir.
+        */
+
+        await interaction.editReply({
           content:
             `✅ Ticket created: ${ticketChannel}`
         });
+
+
+        /*
+          Ticket oluşturuldu mesajı
+          5 saniye sonra otomatik kaybolur.
+        */
+
+        setTimeout(
+          () => {
+            interaction
+              .deleteReply()
+              .catch(
+                () => {}
+              );
+          },
+
+          5000
+        );
+
+        return;
       }
 
 
@@ -1325,7 +1408,7 @@ client.on(
 
         /*
           Düğmeye basan kişinin
-          güncel rollerini çeker.
+          güncel rollerini Discord'dan çeker.
         */
 
         const member =
@@ -1342,8 +1425,10 @@ client.on(
           );
 
         /*
-          Ticketı yalnızca
-          yetkililer kapatabilir.
+          Ticketı yalnızca yetkililer kapatabilir.
+
+          Ticketı açan normal kullanıcı
+          kapatma işlemi yapamaz.
         */
 
         if (!isStaff) {
@@ -1358,7 +1443,7 @@ client.on(
 
         /*
           Ticket zaten kapanıyorsa
-          ikinci işlemi engeller.
+          ikinci kapatma işlemini engeller.
         */
 
         if (
@@ -1438,7 +1523,8 @@ client.on(
           }
 
           /*
-            Ticket mesajlarını toplar.
+            Ticket kanalındaki bütün
+            mesajları toplar.
           */
 
           const allMessages =
@@ -1447,7 +1533,7 @@ client.on(
             );
 
           /*
-            CLOSE düğmeli açılış mesajını
+            Botun ticket başlangıç kartını
             transcript içinden çıkarır.
           */
 
@@ -1569,6 +1655,11 @@ client.on(
               .setTimestamp();
 
 
+          /*
+            Transcript kanalına tek
+            kapanış kartını gönderir.
+          */
+
           logMessage =
             await transcriptChannel.send({
               allowedMentions: {
@@ -1582,8 +1673,8 @@ client.on(
 
 
           /*
-            Benzersiz isimli transcript
-            thread'i oluşturulur.
+            Kapanış kartının altında
+            benzersiz transcript thread'i oluşturur.
           */
 
           transcriptThread =
@@ -1598,6 +1689,11 @@ client.on(
               closedAt
             });
 
+
+          /*
+            Transcript thread'ine
+            doğrudan giden bağlantı düğmesi.
+          */
 
           const viewThreadButton =
             new ButtonBuilder()
@@ -1631,6 +1727,10 @@ client.on(
             archiveError
           );
 
+          /*
+            Thread yarım oluşturulduysa siler.
+          */
+
           if (transcriptThread) {
             await transcriptThread
               .delete()
@@ -1638,6 +1738,10 @@ client.on(
                 () => {}
               );
           }
+
+          /*
+            Kapanış kartı yarım oluşturulduysa siler.
+          */
 
           if (logMessage) {
             await logMessage
@@ -1650,6 +1754,11 @@ client.on(
           closingTickets.delete(
             ticketChannelId
           );
+
+          /*
+            Transcript tamamlanamadığı için
+            ticket kanalını silmez.
+          */
 
           return interaction.editReply({
             content:
@@ -1674,8 +1783,8 @@ client.on(
 
 
         /*
-          Transcript başarıyla oluşturulduktan
-          sonra ticket kanalı silinir.
+          Transcript başarılı şekilde oluşturulduktan
+          sonra ticket kanalını siler.
         */
 
         try {
