@@ -7,6 +7,10 @@ import {
   PermissionsBitField
 } from "discord.js";
 
+import {
+  upsertPanelMessage
+} from "../utils/panelMessage.js";
+
 
 // ==================================================
 // LINKS PANEL SETTINGS
@@ -34,6 +38,10 @@ const OPEN_TICKET_CHANNEL_ID =
 
 const LINKS_PANEL_TITLE =
   "🔗 Eternal Blades Official Links";
+
+const LINKS_PANEL_MESSAGE_ID =
+  process.env.LINKS_PANEL_MESSAGE_ID
+    ?.trim() || "";
 
 
 // ==================================================
@@ -70,48 +78,6 @@ function createLinkField({
   }
 
   return comingSoonText;
-}
-
-
-async function fetchAllMessages(channel) {
-  const messages = [];
-
-  let before;
-
-  while (true) {
-    const batch =
-      await channel.messages.fetch({
-        limit:
-          100,
-
-        ...(before
-          ? {
-              before
-            }
-          : {})
-      });
-
-    if (batch.size === 0) {
-      break;
-    }
-
-    messages.push(
-      ...batch.values()
-    );
-
-    before =
-      batch.last().id;
-
-    if (batch.size < 100) {
-      break;
-    }
-  }
-
-  return messages.sort(
-    (first, second) =>
-      first.createdTimestamp -
-      second.createdTimestamp
-  );
 }
 
 
@@ -411,13 +377,20 @@ export async function setupLinksPanel(
       linksChannel
     );
 
-    const allMessages =
-      await fetchAllMessages(
-        linksChannel
-      );
+    await upsertPanelMessage({
+      channel:
+        linksChannel,
 
-    const panels =
-      allMessages.filter(
+      configuredMessageId:
+        LINKS_PANEL_MESSAGE_ID,
+
+      environmentVariableName:
+        "LINKS_PANEL_MESSAGE_ID",
+
+      panelName:
+        "Links panel",
+
+      isExpectedPanel:
         message =>
           message.author.id ===
             client.user.id &&
@@ -425,56 +398,14 @@ export async function setupLinksPanel(
             embed =>
               embed.title ===
               LINKS_PANEL_TITLE
+          ),
+
+      buildPayload:
+        () =>
+          createLinksPanel(
+            client
           )
-      );
-
-    if (panels.length > 0) {
-      const panelToKeep =
-        panels.at(-1);
-
-      await panelToKeep.edit(
-        createLinksPanel(
-          client
-        )
-      );
-
-      console.log(
-        "Existing links panel updated."
-      );
-
-      for (
-        const duplicatePanel
-        of panels.slice(0, -1)
-      ) {
-        await duplicatePanel
-          .delete()
-          .then(
-            () =>
-              console.log(
-                "Duplicate links panel deleted."
-              )
-          )
-          .catch(
-            error =>
-              console.error(
-                "Duplicate links panel delete error:",
-                error
-              )
-          );
-      }
-
-      return;
-    }
-
-    await linksChannel.send(
-      createLinksPanel(
-        client
-      )
-    );
-
-    console.log(
-      "New links panel sent."
-    );
+    });
 
   } catch (error) {
     console.error(
