@@ -1,14 +1,17 @@
 {
   "name": "eternalbladesbot",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js && node --check panels/linksPanel.js"
+    "check": "node --check index.js && node --check panels/linksPanel.js && node --check utils/panelMessage.js"
   },
   "dependencies": {
-    "discord.js": "14.15.3"
+    "discord.js": "14.27.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
