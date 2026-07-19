@@ -1,8 +1,5 @@
 import {
   EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ChannelType,
   PermissionsBitField
 } from "discord.js";
@@ -62,16 +59,14 @@ function isValidUrl(value) {
 }
 
 
-function createLinkField({
-  configuredUrl,
-  linkText,
-  comingSoonText
-}) {
-  if (isValidUrl(configuredUrl)) {
-    return `[${linkText}](${configuredUrl})`;
-  }
-
-  return comingSoonText;
+function getDisplayedUrl(
+  configuredUrl
+) {
+  return isValidUrl(
+    configuredUrl
+  )
+    ? configuredUrl
+    : "Coming Soon";
 }
 
 
@@ -140,31 +135,9 @@ async function assertLinksChannelPermissions(
 // CREATE LINKS PANEL
 // ==================================================
 
-function createLinksPanel(client) {
-  const websiteField =
-    createLinkField({
-      configuredUrl:
-        WEBSITE_URL,
-
-      linkText:
-        "Visit our official website",
-
-      comingSoonText:
-        "Coming Soon"
-    });
-
-  const twitterField =
-    createLinkField({
-      configuredUrl:
-        TWITTER_URL,
-
-      linkText:
-        "Follow Eternal Blades on X",
-
-      comingSoonText:
-        "Coming Soon"
-    });
-
+function createLinksPanel(
+  client
+) {
   const embed =
     new EmbedBuilder()
       .setTitle(
@@ -195,7 +168,9 @@ function createLinksPanel(client) {
             "Website",
 
           value:
-            websiteField,
+            getDisplayedUrl(
+              WEBSITE_URL
+            ),
 
           inline:
             false
@@ -206,7 +181,9 @@ function createLinksPanel(client) {
             "Twitter / X",
 
           value:
-            twitterField,
+            getDisplayedUrl(
+              TWITTER_URL
+            ),
 
           inline:
             false
@@ -217,54 +194,12 @@ function createLinksPanel(client) {
           "Eternal Blades • Official Channels"
       });
 
-  const linkButtons = [];
-
-  if (isValidUrl(WEBSITE_URL)) {
-    linkButtons.push(
-      new ButtonBuilder()
-        .setLabel(
-          "Website"
-        )
-        .setStyle(
-          ButtonStyle.Link
-        )
-        .setURL(
-          WEBSITE_URL
-        )
-    );
-  }
-
-  if (isValidUrl(TWITTER_URL)) {
-    linkButtons.push(
-      new ButtonBuilder()
-        .setLabel(
-          "Twitter / X"
-        )
-        .setStyle(
-          ButtonStyle.Link
-        )
-        .setURL(
-          TWITTER_URL
-        )
-    );
-  }
-
-  const components =
-    linkButtons.length > 0
-      ? [
-          new ActionRowBuilder()
-            .addComponents(
-              linkButtons
-            )
-        ]
-      : [];
-
   return {
     embeds: [
       embed
     ],
 
-    components,
+    components: [],
 
     allowedMentions: {
       parse: []
