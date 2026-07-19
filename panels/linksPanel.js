@@ -20,21 +20,15 @@ const LINKS_CHANNEL_ID =
   "1506653753569447956";
 
 /*
-  Add the official links later.
+  Add the official website later.
   Empty values safely display "Coming Soon".
 */
 
 const WEBSITE_URL =
-  "https://x.com/S1Y4HS4NC4KS";
+  "";
 
 const TWITTER_URL =
-  "";
-
-const DISCORD_INVITE_URL =
-  "";
-
-const OPEN_TICKET_CHANNEL_ID =
-  "1506778989736493106";
+  "https://x.com/EternalBladesW";
 
 const LINKS_PANEL_TITLE =
   "🔗 Eternal Blades Official Links";
@@ -171,18 +165,6 @@ function createLinksPanel(client) {
         "Coming Soon"
     });
 
-  const discordField =
-    createLinkField({
-      configuredUrl:
-        DISCORD_INVITE_URL,
-
-      linkText:
-        "Join the Eternal Blades Discord",
-
-      comingSoonText:
-        "Coming Soon"
-    });
-
   const embed =
     new EmbedBuilder()
       .setTitle(
@@ -210,7 +192,7 @@ function createLinksPanel(client) {
       .addFields(
         {
           name:
-            " Website",
+            "Website",
 
           value:
             websiteField,
@@ -221,32 +203,10 @@ function createLinksPanel(client) {
 
         {
           name:
-            " Twitter / X",
+            "Twitter / X",
 
           value:
             twitterField,
-
-          inline:
-            false
-        },
-
-        {
-          name:
-            " Discord",
-
-          value:
-            discordField,
-
-          inline:
-            false
-        },
-
-        {
-          name:
-            "🛠 Support",
-
-          value:
-            `Need assistance? Open a ticket in <#${OPEN_TICKET_CHANNEL_ID}>.`,
 
           inline:
             false
@@ -265,9 +225,6 @@ function createLinksPanel(client) {
         .setLabel(
           "Website"
         )
-        .setEmoji(
-          "🌐"
-        )
         .setStyle(
           ButtonStyle.Link
         )
@@ -283,32 +240,11 @@ function createLinksPanel(client) {
         .setLabel(
           "Twitter / X"
         )
-        .setEmoji(
-          ""
-        )
         .setStyle(
           ButtonStyle.Link
         )
         .setURL(
           TWITTER_URL
-        )
-    );
-  }
-
-  if (isValidUrl(DISCORD_INVITE_URL)) {
-    linkButtons.push(
-      new ButtonBuilder()
-        .setLabel(
-          "Discord"
-        )
-        .setEmoji(
-          ""
-        )
-        .setStyle(
-          ButtonStyle.Link
-        )
-        .setURL(
-          DISCORD_INVITE_URL
         )
     );
   }
