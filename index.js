@@ -737,7 +737,7 @@ function createTicketOpeningPayload(
       )
       .setFooter({
         text:
-          "Only authorized staff members can close this ticket."
+          "The ticket creator or authorized staff members can close this ticket."
       })
       .setTimestamp();
 
@@ -789,7 +789,7 @@ function createTicketOpeningPayload(
       )
       .setFooter({
         text:
-          "Only authorized staff members can close this ticket."
+          "The ticket creator or authorized staff members can close this ticket."
       })
       .setTimestamp();
 
@@ -1522,15 +1522,32 @@ async function handleTicketClose(
       interaction.user.id
     );
 
-  if (!hasStaffRole(member)) {
+  const isStaff =
+    hasStaffRole(
+      member
+    );
+
+  const isTicketOwner =
+    metadata.ownerId ===
+      interaction.user.id;
+
+  if (
+    !isStaff &&
+    !isTicketOwner
+  ) {
     return interaction.reply({
       content:
-        "❌ Only authorized staff members can close this ticket.",
+        "❌ Only the ticket creator or authorized staff members can close this ticket.",
 
       flags:
         MessageFlags.Ephemeral
     });
   }
+
+  const closedByType =
+    isStaff
+      ? "Staff"
+      : "Ticket Owner";
 
   const ticketChannel =
     interaction.channel;
@@ -1731,6 +1748,17 @@ async function handleTicketClose(
 
             value:
               `${interaction.user} (${interaction.user.id})`,
+
+            inline:
+              true
+          },
+
+          {
+            name:
+              "Closed by type",
+
+            value:
+              closedByType,
 
             inline:
               true
