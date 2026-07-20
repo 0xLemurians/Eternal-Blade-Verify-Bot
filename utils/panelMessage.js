@@ -129,6 +129,18 @@ function logPanelMessageId({
 }
 
 
+function buildPanelPayload(
+  buildPayload,
+  mode,
+  message = null
+) {
+  return buildPayload({
+    mode,
+    message
+  });
+}
+
+
 export async function upsertPanelMessage({
   channel,
   configuredMessageId,
@@ -159,7 +171,11 @@ export async function upsertPanelMessage({
 
   if (configuredPanel) {
     await configuredPanel.edit(
-      buildPayload()
+      buildPanelPayload(
+        buildPayload,
+        "edit",
+        configuredPanel
+      )
     );
 
     console.log(
@@ -190,7 +206,11 @@ export async function upsertPanelMessage({
       recentPanels.at(-1);
 
     await panelToKeep.edit(
-      buildPayload()
+      buildPanelPayload(
+        buildPayload,
+        "edit",
+        panelToKeep
+      )
     );
 
     console.log(
@@ -242,7 +262,10 @@ export async function upsertPanelMessage({
 
   const newPanel =
     await channel.send(
-      buildPayload()
+      buildPanelPayload(
+        buildPayload,
+        "send"
+      )
     );
 
   console.log(
