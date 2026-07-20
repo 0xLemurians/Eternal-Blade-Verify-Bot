@@ -1,8 +1,17 @@
 import {
+  AttachmentBuilder,
   EmbedBuilder,
   ChannelType,
   PermissionsBitField
 } from "discord.js";
+
+import {
+  existsSync
+} from "node:fs";
+
+import {
+  fileURLToPath
+} from "node:url";
 
 import {
   upsertPanelMessage
@@ -33,6 +42,17 @@ const LINKS_PANEL_TITLE =
 const LINKS_PANEL_MESSAGE_ID =
   process.env.LINKS_PANEL_MESSAGE_ID
     ?.trim() || "";
+
+const LINKS_BANNER_NAME =
+  "links-banner.gif";
+
+const LINKS_BANNER_PATH =
+  fileURLToPath(
+    new URL(
+      `../assets/${LINKS_BANNER_NAME}`,
+      import.meta.url
+    )
+  );
 
 
 // ==================================================
@@ -103,6 +123,12 @@ async function assertLinksChannelPermissions(
     },
     {
       flag:
+        PermissionsBitField.Flags.AttachFiles,
+      name:
+        "Attach Files"
+    },
+    {
+      flag:
         PermissionsBitField.Flags.ReadMessageHistory,
       name:
         "Read Message History"
@@ -136,8 +162,18 @@ async function assertLinksChannelPermissions(
 // ==================================================
 
 function createLinksPanel(
-  client
+  client,
+  context = {}
 ) {
+  const bannerAttachment =
+    new AttachmentBuilder(
+      LINKS_BANNER_PATH,
+      {
+        name:
+          LINKS_BANNER_NAME
+      }
+    );
+
   const embed =
     new EmbedBuilder()
       .setTitle(
@@ -189,14 +225,21 @@ function createLinksPanel(
             false
         }
       )
+      .setImage(
+        `attachment://${LINKS_BANNER_NAME}`
+      )
       .setFooter({
         text:
           "Eternal Blades • Official Channels"
       });
 
-  return {
+  const payload = {
     embeds: [
       embed
+    ],
+
+    files: [
+      bannerAttachment
     ],
 
     components: [],
@@ -205,6 +248,18 @@ function createLinksPanel(
       parse: []
     }
   };
+
+  /*
+    When the existing panel is edited, remove its old
+    attachment before uploading the current GIF again.
+    This prevents duplicate attachments after deploys.
+  */
+
+  if (context.mode === "edit") {
+    payload.attachments = [];
+  }
+
+  return payload;
 }
 
 
@@ -227,6 +282,12 @@ export async function setupLinksPanel(
       );
 
       return;
+    }
+
+    if (!existsSync(LINKS_BANNER_PATH)) {
+      throw new Error(
+        `Links banner was not found: assets/${LINKS_BANNER_NAME}`
+      );
     }
 
     const linksChannel =
@@ -272,9 +333,10 @@ export async function setupLinksPanel(
           ),
 
       buildPayload:
-        () =>
+        context =>
           createLinksPanel(
-            client
+            client,
+            context
           )
     });
 
