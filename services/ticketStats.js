@@ -48,6 +48,9 @@ const ISTANBUL_OFFSET_MS =
   3 * 60 * 60 * 1000;
 
 const TICKET_STATS_PANEL_TITLE =
+  "📊 Eternal Blades Ticket İstatistikleri";
+
+const LEGACY_TICKET_STATS_PANEL_TITLE =
   "📊 Eternal Blades Ticket Statistics";
 
 let statsClient =
@@ -494,9 +497,9 @@ function formatTypeCounts(
     counts.collab;
 
   return [
-    `🎫 Support: **${counts.support}**`,
-    `🤝 Collaboration: **${counts.collab}**`,
-    `Total: **${total}**`
+    `🎫 Destek: **${counts.support}**`,
+    `🤝 İş Birliği: **${counts.collab}**`,
+    `Toplam: **${total}**`
   ].join("\n");
 }
 
@@ -508,7 +511,7 @@ function formatDuration(
     !Number.isFinite(milliseconds) ||
     milliseconds < 0
   ) {
-    return "No data yet";
+    return "Henüz veri yok";
   }
 
   const totalMinutes =
@@ -542,13 +545,13 @@ function formatDuration(
 
   if (days > 0) {
     parts.push(
-      `${days}d`
+      `${days}g`
     );
   }
 
   if (hours > 0) {
     parts.push(
-      `${hours}h`
+      `${hours}sa`
     );
   }
 
@@ -557,7 +560,7 @@ function formatDuration(
     parts.length === 0
   ) {
     parts.push(
-      `${minutes}m`
+      `${minutes}dk`
     );
   }
 
@@ -867,7 +870,7 @@ function createStatsPayload(
             snapshot.oldestOpenTicket.openedAt
           )}`
         )
-      : "No open tickets";
+      : "Açık ticket yok";
 
   const embed =
     new EmbedBuilder()
@@ -875,7 +878,7 @@ function createStatsPayload(
         TICKET_STATS_PANEL_TITLE
       )
       .setDescription(
-        "Live Support and Collaboration ticket overview."
+        "Destek ve İş Birliği ticketlarının canlı özeti."
       )
       .setColor(
         "#ff0000"
@@ -883,7 +886,7 @@ function createStatsPayload(
       .addFields(
         {
           name:
-            "📅 Opened Today",
+            "📅 Bugün Açılanlar",
           value:
             formatTypeCounts(
               snapshot.openedToday
@@ -893,7 +896,7 @@ function createStatsPayload(
         },
         {
           name:
-            "🗓️ Opened This Week",
+            "🗓️ Bu Hafta Açılanlar",
           value:
             formatTypeCounts(
               snapshot.openedThisWeek
@@ -903,18 +906,18 @@ function createStatsPayload(
         },
         {
           name:
-            "✅ Closed Tickets",
+            "✅ Kapatılan Ticketlar",
           value:
             [
-              `Today: **${snapshot.closedToday}**`,
-              `This week: **${snapshot.closedThisWeek}**`
+              `Bugün: **${snapshot.closedToday}**`,
+              `Bu hafta: **${snapshot.closedThisWeek}**`
             ].join("\n"),
           inline:
             true
         },
         {
           name:
-            "📂 Currently Open",
+            "📂 Şu An Açık",
           value:
             formatTypeCounts(
               snapshot.currentlyOpen
@@ -924,17 +927,17 @@ function createStatsPayload(
         },
         {
           name:
-            "⏱️ Average Close Time",
+            "⏱️ Ortalama Kapatma Süresi",
           value:
             `${formatDuration(
               snapshot.averageCloseTime
-            )} • This week`,
+            )} • Bu hafta`,
           inline:
             true
         },
         {
           name:
-            "🕰️ Oldest Open Ticket",
+            "🕰️ En Eski Açık Ticket",
           value:
             oldestOpenText,
           inline:
@@ -942,11 +945,11 @@ function createStatsPayload(
         },
         {
           name:
-            "📦 Category Capacity",
+            "📦 Kategori Kapasitesi",
           value:
             [
-              `Support: **${snapshot.supportCategoryCount}/${TICKET_CATEGORY_CAPACITY}**`,
-              `Collaboration: **${snapshot.collabCategoryCount}/${TICKET_CATEGORY_CAPACITY}**`
+              `Destek: **${snapshot.supportCategoryCount}/${TICKET_CATEGORY_CAPACITY}**`,
+              `İş Birliği: **${snapshot.collabCategoryCount}/${TICKET_CATEGORY_CAPACITY}**`
             ].join("\n"),
           inline:
             false
@@ -954,7 +957,7 @@ function createStatsPayload(
       )
       .setFooter({
         text:
-          "Eternal Blades • Updates automatically"
+          "Eternal Blades • Otomatik güncellenir"
       })
       .setTimestamp(
         snapshot.now
@@ -992,8 +995,12 @@ async function upsertStatsPanel() {
             statsClient.user.id &&
           message.embeds.some(
             embed =>
-              embed.title ===
-                TICKET_STATS_PANEL_TITLE
+              [
+                TICKET_STATS_PANEL_TITLE,
+                LEGACY_TICKET_STATS_PANEL_TITLE
+              ].includes(
+                embed.title
+              )
           ),
       buildPayload:
         () =>
