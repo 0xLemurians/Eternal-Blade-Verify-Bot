@@ -1681,6 +1681,7 @@ function createTicketOpeningPayload(
             "📋 Share with us:",
           value:
             [
+              "",
               "• Project or community name",
               "• Official website and social links",
               "• Your collaboration idea",
@@ -1692,8 +1693,8 @@ function createTicketOpeningPayload(
         {
           name:
             "⚠️ Important",
-          value:
-            "Please keep it genuine and clear. We’ll get back to you as soon as we can.",
+         value:
+           "\nPlease keep it genuine and clear. We’ll get back to you as soon as we can.",
           inline:
             false
         }
