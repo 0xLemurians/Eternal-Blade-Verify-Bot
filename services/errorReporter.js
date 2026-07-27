@@ -4,9 +4,23 @@ import {
   PermissionsBitField
 } from "discord.js";
 
+import {
+  upsertPanelMessage
+} from "../utils/panelMessage.js";
+
 
 const BOT_LOGS_CHANNEL_ID =
   "1531389340675084470";
+
+const BOT_STATUS_MESSAGE_ID =
+  process.env.BOT_STATUS_MESSAGE_ID
+    ?.trim() || "";
+
+const BOT_STATUS_PANEL_TITLES =
+  new Set([
+    "✅ Eternal Blades Online",
+    "⚠️ Eternal Blades Online with Setup Warnings"
+  ]);
 
 const MAX_ERROR_TEXT_LENGTH =
   3500;
@@ -18,6 +32,9 @@ let reporterClient =
   null;
 
 let botLogsChannel =
+  null;
+
+let botStatusMessage =
   null;
 
 
@@ -355,6 +372,89 @@ export async function reportSystemEvent({
     console.error(
       "Discord system event could not be sent:",
       reportingError
+    );
+
+    return false;
+  }
+}
+
+
+export async function updateBotStatus({
+  title,
+  description,
+  color = "#2ecc71"
+}) {
+  if (
+    !reporterClient ||
+    !botLogsChannel
+  ) {
+    return false;
+  }
+
+  try {
+    botStatusMessage =
+      await upsertPanelMessage({
+        channel:
+          botLogsChannel,
+        configuredMessageId:
+          BOT_STATUS_MESSAGE_ID,
+        environmentVariableName:
+          "BOT_STATUS_MESSAGE_ID",
+        panelName:
+          "Bot status panel",
+        isExpectedPanel:
+          message =>
+            message.author.id ===
+              reporterClient.user.id &&
+            message.embeds.some(
+              embed =>
+                BOT_STATUS_PANEL_TITLES.has(
+                  embed.title
+                )
+            ),
+        buildPayload:
+          () => {
+            const embed =
+              new EmbedBuilder()
+                .setTitle(
+                  truncate(
+                    title,
+                    256
+                  )
+                )
+                .setDescription(
+                  truncate(
+                    description,
+                    4000
+                  )
+                )
+                .setColor(
+                  color
+                )
+                .setFooter({
+                  text:
+                    "Eternal Blades System"
+                })
+                .setTimestamp();
+
+            return {
+              embeds: [
+                embed
+              ],
+              components: [],
+              allowedMentions: {
+                parse: []
+              }
+            };
+          }
+      });
+
+    return true;
+
+  } catch (error) {
+    console.error(
+      "Bot status update error:",
+      error
     );
 
     return false;
