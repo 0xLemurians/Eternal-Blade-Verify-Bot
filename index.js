@@ -48,7 +48,18 @@ const TICKET_PANEL_MESSAGE_ID =
   process.env.TICKET_PANEL_MESSAGE_ID
     ?.trim() || "";
 
-const SUPPORT_CATEGORY_ID =
+const SUPPORT_TICKETS_CATEGORY_ID =
+  "1531270150081216643";
+
+const COLLAB_TICKETS_CATEGORY_ID =
+  "1531269649470197830";
+
+/*
+  This category is used only to recognize, close and
+  deduplicate tickets created before the category split.
+  New tickets are never created in this category.
+*/
+const LEGACY_TICKETS_CATEGORY_ID =
   "1506778963392069734";
 
 const SUPPORT_TRANSCRIPT_CHANNEL_ID =
@@ -72,6 +83,18 @@ const ALLOWED_TICKET_TYPES = [
   "collab"
 ];
 
+const TICKET_CREATE_COOLDOWN_MS =
+  15_000;
+
+const MAX_CONCURRENT_TICKET_CREATIONS =
+  3;
+
+const TICKET_CATEGORY_CAPACITY =
+  50;
+
+const CLOSE_CONFIRMATION_TTL_MS =
+  5 * 60_000;
+
 const SHUTDOWN_MAX_WAIT_MS =
   25_000;
 
@@ -81,8 +104,84 @@ const creatingTickets =
 const closingTickets =
   new Set();
 
+const ticketCreateCooldowns =
+  new Map();
+
+const pendingCloseConfirmations =
+  new Map();
+
+const activeOperations =
+  new Map();
+
+const categoryLocks =
+  new Map();
+
+const categoryReservations =
+  new Map();
+
+const ticketCategoryState =
+  new Map(
+    ALLOWED_TICKET_TYPES.map(
+      type => [
+        type,
+        {
+          available:
+            false,
+          categoryId:
+            null,
+          reason:
+            "Category validation has not completed."
+        }
+      ]
+    )
+  );
+
+const ticketCreationQueue = [];
+
+let activeTicketCreations =
+  0;
+
+let staffRolesReady =
+  false;
+
+let ticketGuildId =
+  null;
+
 let isShuttingDown =
   false;
+
+let shutdownTimedOut =
+  false;
+
+let shutdownPromise =
+  null;
+
+let processExitRequested =
+  false;
+
+
+class ShutdownInProgressError extends Error {
+  constructor() {
+    super(
+      "The bot is shutting down."
+    );
+
+    this.name =
+      "ShutdownInProgressError";
+  }
+}
+
+
+class ShutdownDeadlineError extends Error {
+  constructor() {
+    super(
+      "The graceful-shutdown deadline was reached."
+    );
+
+    this.name =
+      "ShutdownDeadlineError";
+  }
+}
 
 
 // ==================================================
@@ -124,22 +223,16 @@ function formatDate(timestamp) {
     {
       timeZone:
         "Europe/Istanbul",
-
       year:
         "numeric",
-
       month:
         "2-digit",
-
       day:
         "2-digit",
-
       hour:
         "2-digit",
-
       minute:
         "2-digit",
-
       second:
         "2-digit"
     }
@@ -154,25 +247,18 @@ function formatThreadTimestamp(timestamp) {
       {
         timeZone:
           "Europe/Istanbul",
-
         year:
           "numeric",
-
         month:
           "2-digit",
-
         day:
           "2-digit",
-
         hour:
           "2-digit",
-
         minute:
           "2-digit",
-
         second:
           "2-digit",
-
         hourCycle:
           "h23"
       }
@@ -200,37 +286,16 @@ function formatThreadTimestamp(timestamp) {
 }
 
 
-function parseTicketMetadata(topic = "") {
-  const ownerMatch =
-    topic.match(
-      /User ID:\s*(\d+)/i
-    );
+function getTicketCategoryId(type) {
+  if (type === "support") {
+    return SUPPORT_TICKETS_CATEGORY_ID;
+  }
 
-  const typeMatch =
-    topic.match(
-      /Type:\s*(support|collab)/i
-    );
+  if (type === "collab") {
+    return COLLAB_TICKETS_CATEGORY_ID;
+  }
 
-  const openedAtMatch =
-    topic.match(
-      /Opened At:\s*(\d+)/i
-    );
-
-  return {
-    ownerId:
-      ownerMatch?.[1] || null,
-
-    type:
-      typeMatch?.[1]
-        ?.toLowerCase() || null,
-
-    openedAt:
-      openedAtMatch?.[1]
-        ? Number(
-            openedAtMatch[1]
-          )
-        : null
-  };
+  return null;
 }
 
 
@@ -247,6 +312,15 @@ function getTranscriptChannelId(type) {
 }
 
 
+function getTicketCreationKey({
+  guildId,
+  userId,
+  type
+}) {
+  return `${guildId}:${userId}:${type}`;
+}
+
+
 function hasStaffRole(member) {
   return STAFF_ROLE_IDS.some(
     roleId =>
@@ -257,37 +331,231 @@ function hasStaffRole(member) {
 }
 
 
-function getTicketCreationKey({
-  guildId,
-  userId,
+function isKnownTicketParent(
+  parentId,
   type
-}) {
-  return `${guildId}:${userId}:${type}`;
+) {
+  return (
+    parentId ===
+      getTicketCategoryId(type) ||
+    parentId ===
+      LEGACY_TICKETS_CATEGORY_ID
+  );
 }
 
 
-function isTicketChannelForUser(
-  channel,
-  userId,
-  type
+function stripTranscriptMetadata(
+  topic = ""
 ) {
-  if (
-    channel.type !==
-      ChannelType.GuildText ||
-    channel.parentId !==
-      SUPPORT_CATEGORY_ID
-  ) {
-    return false;
-  }
+  const marker =
+    " | Transcript Status:";
 
-  const metadata =
-    parseTicketMetadata(
-      channel.topic || ""
-    );
+  const markerIndex =
+    topic.indexOf(marker);
 
   return (
-    metadata.ownerId === userId &&
-    metadata.type === type
+    markerIndex === -1
+      ? topic
+      : topic.slice(
+          0,
+          markerIndex
+        )
+  ).trim();
+}
+
+
+function parseTicketMetadata(topic = "") {
+  const ownerMatch =
+    topic.match(
+      /User ID:\s*(\d+)/i
+    );
+
+  const typeMatch =
+    topic.match(
+      /Type:\s*(support|collab)/i
+    );
+
+  const openedAtMatch =
+    topic.match(
+      /Opened At:\s*(\d+)/i
+    );
+
+  const transcriptStatusMatch =
+    topic.match(
+      /Transcript Status:\s*(creating|complete)/i
+    );
+
+  const transcriptThreadMatch =
+    topic.match(
+      /Transcript Thread ID:\s*(\d+)/i
+    );
+
+  const transcriptLogMatch =
+    topic.match(
+      /Transcript Log ID:\s*(\d+)/i
+    );
+
+  const closedAtMatch =
+    topic.match(
+      /Closed At:\s*(\d+)/i
+    );
+
+  const closedByMatch =
+    topic.match(
+      /Closed By:\s*(\d+)/i
+    );
+
+  const deletePendingMatch =
+    topic.match(
+      /Delete Pending:\s*(yes|no)/i
+    );
+
+  return {
+    ownerId:
+      ownerMatch?.[1] || null,
+    type:
+      typeMatch?.[1]
+        ?.toLowerCase() || null,
+    openedAt:
+      openedAtMatch?.[1]
+        ? Number(
+            openedAtMatch[1]
+          )
+        : null,
+    transcriptStatus:
+      transcriptStatusMatch?.[1]
+        ?.toLowerCase() || null,
+    transcriptThreadId:
+      transcriptThreadMatch?.[1] ||
+      null,
+    transcriptLogMessageId:
+      transcriptLogMatch?.[1] ||
+      null,
+    closedAt:
+      closedAtMatch?.[1]
+        ? Number(
+            closedAtMatch[1]
+          )
+        : null,
+    closedById:
+      closedByMatch?.[1] ||
+      null,
+    deletePending:
+      deletePendingMatch?.[1]
+        ?.toLowerCase() === "yes"
+  };
+}
+
+
+function buildTicketTopic(
+  ticketChannel,
+  {
+    status,
+    threadId = null,
+    logMessageId = null,
+    closedAt = null,
+    closedById = null,
+    deletePending = false
+  } = {}
+) {
+  const baseTopic =
+    stripTranscriptMetadata(
+      ticketChannel.topic || ""
+    );
+
+  if (!status) {
+    return baseTopic;
+  }
+
+  const parts = [
+    baseTopic,
+    `Transcript Status: ${status}`
+  ];
+
+  if (threadId) {
+    parts.push(
+      `Transcript Thread ID: ${threadId}`
+    );
+  }
+
+  if (logMessageId) {
+    parts.push(
+      `Transcript Log ID: ${logMessageId}`
+    );
+  }
+
+  if (closedAt) {
+    parts.push(
+      `Closed At: ${closedAt}`
+    );
+  }
+
+  if (closedById) {
+    parts.push(
+      `Closed By: ${closedById}`
+    );
+  }
+
+  parts.push(
+    `Delete Pending: ${
+      deletePending
+        ? "yes"
+        : "no"
+    }`
+  );
+
+  const topic =
+    parts.join(" | ");
+
+  if (topic.length > 1024) {
+    throw new Error(
+      "Ticket metadata would exceed Discord's 1024-character topic limit."
+    );
+  }
+
+  return topic;
+}
+
+
+async function updateTicketTranscriptMetadata(
+  ticketChannel,
+  metadata,
+  reason
+) {
+  const topic =
+    buildTicketTopic(
+      ticketChannel,
+      metadata
+    );
+
+  await ticketChannel.setTopic(
+    topic,
+    reason
+  );
+}
+
+
+function getTranscriptUrl(
+  guildId,
+  threadId
+) {
+  if (!threadId) {
+    return null;
+  }
+
+  return (
+    "https://discord.com/channels/" +
+    `${guildId}/${threadId}`
+  );
+}
+
+
+function isUnknownDiscordResource(
+  error
+) {
+  return (
+    error?.code === 10003 ||
+    error?.code === 10008
   );
 }
 
@@ -300,15 +568,6 @@ function validateTicketChannel(channel) {
   ) {
     throw new Error(
       "The interaction channel is not a guild text channel."
-    );
-  }
-
-  if (
-    channel.parentId !==
-    SUPPORT_CATEGORY_ID
-  ) {
-    throw new Error(
-      "The close button was used outside the configured ticket category."
     );
   }
 
@@ -334,7 +593,80 @@ function validateTicketChannel(channel) {
     );
   }
 
+  if (
+    !isKnownTicketParent(
+      channel.parentId,
+      metadata.type
+    )
+  ) {
+    throw new Error(
+      "The ticket category does not match the ticket metadata."
+    );
+  }
+
   return metadata;
+}
+
+
+function isTicketChannelForUser(
+  channel,
+  userId,
+  type
+) {
+  if (
+    channel.type !==
+      ChannelType.GuildText ||
+    !isKnownTicketParent(
+      channel.parentId,
+      type
+    )
+  ) {
+    return false;
+  }
+
+  const metadata =
+    parseTicketMetadata(
+      channel.topic || ""
+    );
+
+  return (
+    metadata.ownerId === userId &&
+    metadata.type === type
+  );
+}
+
+
+function getOpenTicketsFromChannels(
+  channels,
+  userId,
+  type
+) {
+  return [
+    ...channels.values()
+  ]
+    .filter(
+      channel =>
+        isTicketChannelForUser(
+          channel,
+          userId,
+          type
+        )
+    )
+    .sort(
+      (first, second) => {
+        const timestampDifference =
+          first.createdTimestamp -
+          second.createdTimestamp;
+
+        if (timestampDifference !== 0) {
+          return timestampDifference;
+        }
+
+        return first.id.localeCompare(
+          second.id
+        );
+      }
+    );
 }
 
 
@@ -374,30 +706,620 @@ async function assertChannelPermissions(
 }
 
 
-async function validateStaffRoles(guild) {
-  const roles =
-    await guild.roles.fetch();
-
-  const missingRoleIds =
-    STAFF_ROLE_IDS.filter(
-      roleId =>
-        !roles.has(roleId)
+function assertTicketCategoryPermissions(
+  category,
+  botMember,
+  type
+) {
+  const permissions =
+    category.permissionsFor(
+      botMember
     );
+
+  const required = [
+    {
+      flag:
+        PermissionsBitField.Flags.ViewChannel,
+      name:
+        "View Channel"
+    },
+    {
+      flag:
+        PermissionsBitField.Flags.ManageChannels,
+      name:
+        "Manage Channels"
+    }
+  ];
+
+  const missing =
+    required.filter(
+      permission =>
+        !permissions?.has(
+          permission.flag
+        )
+    );
+
+  if (missing.length > 0) {
+    throw new Error(
+      `${type} ticket category is missing bot permissions: ` +
+      missing
+        .map(
+          permission =>
+            permission.name
+        )
+        .join(", ")
+    );
+  }
+}
+
+
+async function respondToInteraction(
+  interaction,
+  content
+) {
+  if (!interaction.isRepliable()) {
+    return;
+  }
+
+  if (
+    interaction.deferred ||
+    interaction.replied
+  ) {
+    await interaction.editReply({
+      content,
+      components: []
+    });
+
+    return;
+  }
+
+  await interaction.reply({
+    content,
+    flags:
+      MessageFlags.Ephemeral
+  });
+}
+
+
+function beginOperation(details) {
+  const operationToken =
+    Symbol(details.kind);
+
+  activeOperations.set(
+    operationToken,
+    {
+      ...details,
+      stage:
+        details.stage || "starting",
+      startedAt:
+        Date.now()
+    }
+  );
+
+  return operationToken;
+}
+
+
+function updateOperation(
+  operationToken,
+  updates
+) {
+  const operation =
+    activeOperations.get(
+      operationToken
+    );
+
+  if (operation) {
+    Object.assign(
+      operation,
+      updates
+    );
+  }
+}
+
+
+function endOperation(operationToken) {
+  activeOperations.delete(
+    operationToken
+  );
+}
+
+
+function getOperationCounts() {
+  let creations = 0;
+  let queuedCreations = 0;
+  let closes = 0;
+
+  for (
+    const operation
+    of activeOperations.values()
+  ) {
+    if (operation.kind === "creation") {
+      creations += 1;
+
+      if (
+        operation.stage ===
+        "queued"
+      ) {
+        queuedCreations += 1;
+      }
+    }
+
+    if (operation.kind === "close") {
+      closes += 1;
+    }
+  }
+
+  return {
+    total:
+      activeOperations.size,
+    creations,
+    queuedCreations,
+    closes
+  };
+}
+
+
+function ensureShutdownDeadlineNotReached() {
+  if (shutdownTimedOut) {
+    throw new ShutdownDeadlineError();
+  }
+}
+
+
+// ==================================================
+// COOLDOWN AND CONFIRMATION CLEANUP
+// ==================================================
+
+function getCooldownRemainingSeconds(
+  creationKey
+) {
+  const expiresAt =
+    ticketCreateCooldowns.get(
+      creationKey
+    );
+
+  if (!expiresAt) {
+    return 0;
+  }
+
+  const remainingMilliseconds =
+    expiresAt - Date.now();
+
+  if (remainingMilliseconds <= 0) {
+    ticketCreateCooldowns.delete(
+      creationKey
+    );
+
+    return 0;
+  }
+
+  return Math.ceil(
+    remainingMilliseconds / 1000
+  );
+}
+
+
+function cleanupRuntimeMaps() {
+  const now =
+    Date.now();
+
+  for (
+    const [
+      key,
+      expiresAt
+    ]
+    of ticketCreateCooldowns
+  ) {
+    if (expiresAt <= now) {
+      ticketCreateCooldowns.delete(
+        key
+      );
+    }
+  }
+
+  for (
+    const [
+      requestId,
+      confirmation
+    ]
+    of pendingCloseConfirmations
+  ) {
+    if (
+      confirmation.expiresAt <=
+      now
+    ) {
+      pendingCloseConfirmations.delete(
+        requestId
+      );
+    }
+  }
+}
+
+
+const runtimeCleanupTimer =
+  setInterval(
+    cleanupRuntimeMaps,
+    60_000
+  );
+
+runtimeCleanupTimer.unref();
+
+
+// ==================================================
+// GLOBAL CREATION SEMAPHORE
+// ==================================================
+
+function makeCreationSlotRelease() {
+  let released =
+    false;
+
+  return () => {
+    if (released) {
+      return;
+    }
+
+    released =
+      true;
+
+    activeTicketCreations =
+      Math.max(
+        0,
+        activeTicketCreations - 1
+      );
+
+    drainTicketCreationQueue();
+  };
+}
+
+
+function drainTicketCreationQueue() {
+  if (isShuttingDown) {
+    cancelQueuedTicketCreations();
+    return;
+  }
+
+  while (
+    activeTicketCreations <
+      MAX_CONCURRENT_TICKET_CREATIONS &&
+    ticketCreationQueue.length > 0
+  ) {
+    const queued =
+      ticketCreationQueue.shift();
+
+    activeTicketCreations +=
+      1;
+
+    queued.resolve(
+      makeCreationSlotRelease()
+    );
+  }
+}
+
+
+function acquireTicketCreationSlot({
+  userId,
+  type
+}) {
+  if (isShuttingDown) {
+    return Promise.reject(
+      new ShutdownInProgressError()
+    );
+  }
+
+  if (
+    activeTicketCreations <
+    MAX_CONCURRENT_TICKET_CREATIONS
+  ) {
+    activeTicketCreations +=
+      1;
+
+    return Promise.resolve(
+      makeCreationSlotRelease()
+    );
+  }
+
+  return new Promise(
+    (resolve, reject) => {
+      ticketCreationQueue.push({
+        resolve,
+        reject,
+        userId,
+        type
+      });
+    }
+  );
+}
+
+
+function cancelQueuedTicketCreations() {
+  const queuedItems =
+    ticketCreationQueue.splice(
+      0
+    );
+
+  for (const queued of queuedItems) {
+    queued.reject(
+      new ShutdownInProgressError()
+    );
+  }
+}
+
+
+// ==================================================
+// CATEGORY LOCKS AND RESERVATIONS
+// ==================================================
+
+function getCategoryLock(categoryId) {
+  if (!categoryLocks.has(categoryId)) {
+    categoryLocks.set(
+      categoryId,
+      {
+        locked:
+          false,
+        queue:
+          []
+      }
+    );
+  }
+
+  return categoryLocks.get(
+    categoryId
+  );
+}
+
+
+function makeCategoryLockRelease(
+  categoryId
+) {
+  let released =
+    false;
+
+  return () => {
+    if (released) {
+      return;
+    }
+
+    released =
+      true;
+
+    const lock =
+      getCategoryLock(
+        categoryId
+      );
+
+    const next =
+      lock.queue.shift();
+
+    if (next) {
+      next(
+        makeCategoryLockRelease(
+          categoryId
+        )
+      );
+
+      return;
+    }
+
+    lock.locked =
+      false;
+  };
+}
+
+
+function acquireCategoryLock(categoryId) {
+  const lock =
+    getCategoryLock(
+      categoryId
+    );
+
+  if (!lock.locked) {
+    lock.locked =
+      true;
+
+    return Promise.resolve(
+      makeCategoryLockRelease(
+        categoryId
+      )
+    );
+  }
+
+  return new Promise(
+    resolve => {
+      lock.queue.push(
+        resolve
+      );
+    }
+  );
+}
+
+
+function reserveCategorySlot(categoryId) {
+  const current =
+    categoryReservations.get(
+      categoryId
+    ) || 0;
+
+  categoryReservations.set(
+    categoryId,
+    current + 1
+  );
+}
+
+
+function releaseCategoryReservation(
+  categoryId
+) {
+  const current =
+    categoryReservations.get(
+      categoryId
+    ) || 0;
+
+  if (current <= 1) {
+    categoryReservations.delete(
+      categoryId
+    );
+
+    return;
+  }
+
+  categoryReservations.set(
+    categoryId,
+    current - 1
+  );
+}
+
+
+// ==================================================
+// STARTUP VALIDATION
+// ==================================================
+
+async function validateStaffRoles(guild) {
+  const missingRoleIds = [];
+
+  for (const roleId of STAFF_ROLE_IDS) {
+    let role =
+      guild.roles.cache.get(
+        roleId
+      );
+
+    if (!role) {
+      role =
+        await guild.roles
+          .fetch(
+            roleId
+          )
+          .catch(
+            error => {
+              console.error(
+                `Staff role fetch failed for ${roleId}:`,
+                error
+              );
+
+              return null;
+            }
+          );
+    }
+
+    if (!role) {
+      missingRoleIds.push(
+        roleId
+      );
+    }
+  }
 
   if (missingRoleIds.length > 0) {
     console.error(
-      "Configured staff roles could not be found:",
+      "Ticket creation disabled because required staff roles are missing:",
       missingRoleIds
     );
 
+    staffRolesReady =
+      false;
+
     return false;
   }
+
+  staffRolesReady =
+    true;
 
   console.log(
     "Staff role IDs validated successfully."
   );
 
   return true;
+}
+
+
+async function validateTicketCategory(
+  guild,
+  type
+) {
+  const categoryId =
+    getTicketCategoryId(type);
+
+  try {
+    let category =
+      guild.channels.cache.get(
+        categoryId
+      );
+
+    if (!category) {
+      category =
+        await guild.channels.fetch(
+          categoryId,
+          {
+            force:
+              true
+          }
+        );
+    }
+
+    if (
+      !category ||
+      category.type !==
+        ChannelType.GuildCategory
+    ) {
+      throw new Error(
+        "The configured channel is missing or is not a guild category."
+      );
+    }
+
+    if (
+      category.guild.id !==
+      guild.id
+    ) {
+      throw new Error(
+        "The configured category belongs to a different guild."
+      );
+    }
+
+    const botMember =
+      guild.members.me ||
+      await guild.members.fetchMe();
+
+    assertTicketCategoryPermissions(
+      category,
+      botMember,
+      type
+    );
+
+    ticketCategoryState.set(
+      type,
+      {
+        available:
+          true,
+        categoryId,
+        reason:
+          null
+      }
+    );
+
+    console.log(
+      `${type} ticket category validated successfully: ${categoryId}`
+    );
+
+    return true;
+
+  } catch (error) {
+    ticketCategoryState.set(
+      type,
+      {
+        available:
+          false,
+        categoryId,
+        reason:
+          error.message
+      }
+    );
+
+    console.error(
+      `${type} ticket category validation failed for ${categoryId}:`,
+      error
+    );
+
+    return false;
+  }
 }
 
 
@@ -411,11 +1333,12 @@ async function fetchAllTicketMessages(channel) {
   let before;
 
   while (true) {
+    ensureShutdownDeadlineNotReached();
+
     const batch =
       await channel.messages.fetch({
         limit:
           100,
-
         ...(before
           ? {
               before
@@ -471,7 +1394,6 @@ function createTicketPanel() {
         {
           name:
             "✅ Open a ticket for:",
-
           value:
             [
               "• Support issues",
@@ -479,15 +1401,12 @@ function createTicketPanel() {
               "• Collaboration requests",
               "• Partnership proposals"
             ].join("\n"),
-
           inline:
             false
         },
-
         {
           name:
             "❌ Do not open a ticket for:",
-
           value:
             [
               "• General chat",
@@ -496,15 +1415,12 @@ function createTicketPanel() {
               "• Fake or unserious partnership offers",
               "• Duplicate tickets about the same issue"
             ].join("\n"),
-
           inline:
             false
         },
-
         {
           name:
             "📌 Before opening a ticket:",
-
           value:
             [
               "• Check #announcements and #links first",
@@ -512,7 +1428,6 @@ function createTicketPanel() {
               "• Explain your request clearly",
               "• Keep only one active ticket per category"
             ].join("\n"),
-
           inline:
             false
         }
@@ -544,7 +1459,6 @@ function createTicketPanel() {
           .setValue(
             "support"
           ),
-
         new StringSelectMenuOptionBuilder()
           .setLabel(
             "Collaboration"
@@ -564,7 +1478,6 @@ function createTicketPanel() {
     embeds: [
       ticketPanelEmbed
     ],
-
     components: [
       new ActionRowBuilder()
         .addComponents(
@@ -592,9 +1505,23 @@ async function setupTicketPanel() {
       );
     }
 
+    ticketGuildId =
+      ticketPanelChannel.guild.id;
+
     await validateStaffRoles(
       ticketPanelChannel.guild
     );
+
+    await Promise.all([
+      validateTicketCategory(
+        ticketPanelChannel.guild,
+        "support"
+      ),
+      validateTicketCategory(
+        ticketPanelChannel.guild,
+        "collab"
+      )
+    ]);
 
     await assertChannelPermissions(
       ticketPanelChannel,
@@ -630,16 +1557,12 @@ async function setupTicketPanel() {
     await upsertPanelMessage({
       channel:
         ticketPanelChannel,
-
       configuredMessageId:
         TICKET_PANEL_MESSAGE_ID,
-
       environmentVariableName:
         "TICKET_PANEL_MESSAGE_ID",
-
       panelName:
         "Ticket panel",
-
       isExpectedPanel:
         message =>
           message.author.id ===
@@ -652,7 +1575,6 @@ async function setupTicketPanel() {
                   "ticket_select"
               )
           ),
-
       buildPayload:
         () =>
           createTicketPanel()
@@ -668,7 +1590,7 @@ async function setupTicketPanel() {
 
 
 // ==================================================
-// TICKET MESSAGE EMBEDS
+// TICKET OPENING MESSAGE
 // ==================================================
 
 function createTicketOpeningPayload(
@@ -711,7 +1633,6 @@ function createTicketOpeningPayload(
         {
           name:
             "📌 Please include:",
-
           value:
             [
               "• A clear explanation of the problem",
@@ -719,18 +1640,14 @@ function createTicketOpeningPayload(
               "• The steps that caused the issue",
               "• Any other useful information"
             ].join("\n"),
-
           inline:
             false
         },
-
         {
           name:
             "⏳ Response time",
-
           value:
             "Please remain patient and avoid repeatedly mentioning staff members.",
-
           inline:
             false
         }
@@ -762,7 +1679,6 @@ function createTicketOpeningPayload(
         {
           name:
             "📋 Please include:",
-
           value:
             [
               "• Project or community name",
@@ -771,18 +1687,14 @@ function createTicketOpeningPayload(
               "• Your proposed collaboration",
               "• What both communities will gain"
             ].join("\n"),
-
           inline:
             false
         },
-
         {
           name:
             "⚠️ Important",
-
           value:
             "Fake, incomplete or unserious partnership offers may be closed without a response.",
-
           inline:
             false
         }
@@ -796,19 +1708,16 @@ function createTicketOpeningPayload(
   return {
     content:
       `<@${userId}>`,
-
     allowedMentions: {
       users: [
         userId
       ]
     },
-
     embeds: [
       type === "support"
         ? supportEmbed
         : collabEmbed
     ],
-
     components: [
       new ActionRowBuilder()
         .addComponents(
@@ -819,57 +1728,27 @@ function createTicketOpeningPayload(
 }
 
 
-// ==================================================
-// OPEN-TICKET HELPERS
-// ==================================================
-
-async function getOpenTickets(
-  guild,
-  userId,
-  type
-) {
-  await guild.channels.fetch();
-
-  return [
-    ...guild.channels.cache.values()
-  ]
-    .filter(
-      channel =>
-        isTicketChannelForUser(
-          channel,
-          userId,
-          type
-        )
-    )
-    .sort(
-      (first, second) =>
-        first.createdTimestamp -
-        second.createdTimestamp
-    );
-}
-
-
-async function buildTicketPermissionOverwrites(
+function buildTicketPermissionOverwrites(
   guild,
   userId
 ) {
-  const roles =
-    await guild.roles.fetch();
+  if (!staffRolesReady) {
+    throw new Error(
+      "Required staff roles are not available. Ticket creation was stopped for safety."
+    );
+  }
 
-  const permissionOverwrites = [
+  return [
     {
       id:
         guild.id,
-
       deny: [
         PermissionsBitField.Flags.ViewChannel
       ]
     },
-
     {
       id:
         client.user.id,
-
       allow: [
         PermissionsBitField.Flags.ViewChannel,
         PermissionsBitField.Flags.SendMessages,
@@ -879,11 +1758,9 @@ async function buildTicketPermissionOverwrites(
         PermissionsBitField.Flags.AttachFiles
       ]
     },
-
     {
       id:
         userId,
-
       allow: [
         PermissionsBitField.Flags.ViewChannel,
         PermissionsBitField.Flags.SendMessages,
@@ -891,105 +1768,54 @@ async function buildTicketPermissionOverwrites(
         PermissionsBitField.Flags.EmbedLinks,
         PermissionsBitField.Flags.AttachFiles
       ]
-    }
+    },
+    ...STAFF_ROLE_IDS.map(
+      roleId => ({
+        id:
+          roleId,
+        allow: [
+          PermissionsBitField.Flags.ViewChannel,
+          PermissionsBitField.Flags.SendMessages,
+          PermissionsBitField.Flags.ReadMessageHistory,
+          PermissionsBitField.Flags.EmbedLinks,
+          PermissionsBitField.Flags.AttachFiles
+        ]
+      })
+    )
   ];
-
-  for (const roleId of STAFF_ROLE_IDS) {
-    if (!roles.has(roleId)) {
-      console.error(
-        `Configured staff role was not found: ${roleId}`
-      );
-
-      continue;
-    }
-
-    permissionOverwrites.push({
-      id:
-        roleId,
-
-      allow: [
-        PermissionsBitField.Flags.ViewChannel,
-        PermissionsBitField.Flags.SendMessages,
-        PermissionsBitField.Flags.ReadMessageHistory,
-        PermissionsBitField.Flags.EmbedLinks,
-        PermissionsBitField.Flags.AttachFiles
-      ]
-    });
-  }
-
-  const configuredStaffCount =
-    STAFF_ROLE_IDS.filter(
-      roleId =>
-        roles.has(roleId)
-    ).length;
-
-  if (configuredStaffCount === 0) {
-    throw new Error(
-      "No configured staff role could be found. Ticket creation was stopped for safety."
-    );
-  }
-
-  return permissionOverwrites;
 }
 
+
+// ==================================================
+// CREATE TICKET
+// ==================================================
 
 async function handleTicketCreation(
   interaction
 ) {
-  if (!interaction.guild) {
-    return interaction.reply({
-      content:
-        "❌ This action can only be used in a server.",
-
-      flags:
-        MessageFlags.Ephemeral
-    });
-  }
-
-  await interaction.deferReply({
-    flags:
-      MessageFlags.Ephemeral
-  });
-
   const type =
-    interaction.values[0];
+    interaction.values?.[0];
 
-  if (
-    !ALLOWED_TICKET_TYPES.includes(
-      type
-    )
-  ) {
-    return interaction.editReply({
-      content:
-        "❌ Invalid ticket category."
-    });
-  }
-
-  const creationKey =
-    getTicketCreationKey({
-      guildId:
-        interaction.guild.id,
-
+  const operationToken =
+    beginOperation({
+      kind:
+        "creation",
+      stage:
+        "starting",
       userId:
         interaction.user.id,
-
-      type
+      type:
+        type || "unknown"
     });
 
-  if (
-    creatingTickets.has(
-      creationKey
-    )
-  ) {
-    return interaction.editReply({
-      content:
-        "⏳ Your ticket is already being created. Please wait."
-    });
-  }
+  let creationKey =
+    null;
 
-  creatingTickets.add(
-    creationKey
-  );
+  let releaseCreationSlot =
+    null;
+
+  let reservedCategoryId =
+    null;
 
   let createdTicketChannel =
     null;
@@ -998,28 +1824,298 @@ async function handleTicketCreation(
     false;
 
   try {
-    const existingTickets =
-      await getOpenTickets(
-        interaction.guild,
-        interaction.user.id,
+    if (
+      isShuttingDown
+    ) {
+      return await respondToInteraction(
+        interaction,
+        "⏳ The bot is restarting. Please try again in a moment."
+      );
+    }
+
+    if (!interaction.guild) {
+      return await respondToInteraction(
+        interaction,
+        "❌ This action can only be used in a server."
+      );
+    }
+
+    if (
+      !ALLOWED_TICKET_TYPES.includes(
+        type
+      )
+    ) {
+      return await respondToInteraction(
+        interaction,
+        "❌ Invalid ticket category."
+      );
+    }
+
+    creationKey =
+      getTicketCreationKey({
+        guildId:
+          interaction.guild.id,
+        userId:
+          interaction.user.id,
+        type
+      });
+
+    if (
+      creatingTickets.has(
+        creationKey
+      )
+    ) {
+      return await respondToInteraction(
+        interaction,
+        "⏳ Your ticket is already being created. Please wait."
+      );
+    }
+
+    creatingTickets.add(
+      creationKey
+    );
+
+    await interaction.deferReply({
+      flags:
+        MessageFlags.Ephemeral
+    });
+
+    if (
+      ticketGuildId &&
+      interaction.guild.id !==
+        ticketGuildId
+    ) {
+      return await interaction.editReply({
+        content:
+          "❌ This ticket panel is not configured for this server."
+      });
+    }
+
+    if (!staffRolesReady) {
+      return await interaction.editReply({
+        content:
+          "❌ Ticket creation is temporarily unavailable because the required staff roles could not be validated."
+      });
+    }
+
+    const categoryStatus =
+      ticketCategoryState.get(
         type
       );
 
-    if (existingTickets.length > 0) {
-      const keeper =
-        existingTickets[0];
+    if (!categoryStatus?.available) {
+      return await interaction.editReply({
+        content:
+          "❌ This ticket category is temporarily unavailable. Please contact a staff member."
+      });
+    }
 
-      if (existingTickets.length > 1) {
-        console.warn(
-          `Multiple existing ${type} tickets were found for user ${interaction.user.id}. No existing channel was deleted automatically.`
+    const cooldownRemaining =
+      getCooldownRemainingSeconds(
+        creationKey
+      );
+
+    if (cooldownRemaining > 0) {
+      return await interaction.editReply({
+        content:
+          `Please wait ${cooldownRemaining} seconds before creating another ticket of this type.`
+      });
+    }
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "queued"
+      }
+    );
+
+    releaseCreationSlot =
+      await acquireTicketCreationSlot({
+        userId:
+          interaction.user.id,
+        type
+      });
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "checking"
+      }
+    );
+
+    if (isShuttingDown) {
+      throw new ShutdownInProgressError();
+    }
+
+    const categoryId =
+      getTicketCategoryId(type);
+
+    const releaseCategoryLock =
+      await acquireCategoryLock(
+        categoryId
+      );
+
+    let existingTickets = [];
+
+    try {
+      if (isShuttingDown) {
+        throw new ShutdownInProgressError();
+      }
+
+      const channels =
+        await interaction.guild.channels.fetch();
+
+      const targetCategory =
+        channels.get(
+          categoryId
+        );
+
+      if (
+        !targetCategory ||
+        targetCategory.type !==
+          ChannelType.GuildCategory ||
+        targetCategory.guild.id !==
+          interaction.guild.id
+      ) {
+        ticketCategoryState.set(
+          type,
+          {
+            available:
+              false,
+            categoryId,
+            reason:
+              "The target category is missing, invalid or belongs to another guild."
+          }
+        );
+
+        return await interaction.editReply({
+          content:
+            "❌ This ticket category is temporarily unavailable. Please contact a staff member."
+        });
+      }
+
+      const botMember =
+        interaction.guild.members.me;
+
+      if (!botMember) {
+        throw new Error(
+          "The bot guild member could not be resolved."
         );
       }
 
-      return interaction.editReply({
-        content:
-          `❌ You already have an open ${type} ticket: ${keeper}`
-      });
+      try {
+        assertTicketCategoryPermissions(
+          targetCategory,
+          botMember,
+          type
+        );
+
+      } catch (permissionError) {
+        ticketCategoryState.set(
+          type,
+          {
+            available:
+              false,
+            categoryId,
+            reason:
+              permissionError.message
+          }
+        );
+
+        console.error(
+          `${type} ticket category permission validation failed:`,
+          permissionError
+        );
+
+        return await interaction.editReply({
+          content:
+            "❌ This ticket category is temporarily unavailable because the bot is missing required permissions."
+        });
+      }
+
+      existingTickets =
+        getOpenTicketsFromChannels(
+          channels,
+          interaction.user.id,
+          type
+        );
+
+      if (existingTickets.length > 0) {
+        const keeper =
+          existingTickets[0];
+
+        if (existingTickets.length > 1) {
+          console.warn(
+            `Multiple existing ${type} tickets were found for user ${interaction.user.id}. No existing channel was deleted automatically.`
+          );
+        }
+
+        return await interaction.editReply({
+          content:
+            `❌ You already have an open ${type} ticket: ${keeper}`
+        });
+      }
+
+      const directChildCount =
+        channels.filter(
+          channel =>
+            channel.parentId ===
+            categoryId
+        ).size;
+
+      const reservationCount =
+        categoryReservations.get(
+          categoryId
+        ) || 0;
+
+      const effectiveChildCount =
+        directChildCount +
+        reservationCount;
+
+      if (
+        effectiveChildCount >=
+        TICKET_CATEGORY_CAPACITY
+      ) {
+        console.warn(
+          "Ticket creation rejected because the category is full:",
+          {
+            type,
+            userId:
+              interaction.user.id,
+            categoryId,
+            directChildCount,
+            reservationCount,
+            capacity:
+              TICKET_CATEGORY_CAPACITY
+          }
+        );
+
+        return await interaction.editReply({
+          content:
+            "This ticket category is currently full. Please wait for an existing ticket to close or contact a staff member."
+        });
+      }
+
+      reserveCategorySlot(
+        categoryId
+      );
+
+      reservedCategoryId =
+        categoryId;
+
+    } finally {
+      releaseCategoryLock();
     }
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "creating"
+      }
+    );
 
     const safeUsername =
       interaction.user.username
@@ -1041,12 +2137,6 @@ async function handleTicketCreation(
       `${type}-${usernamePart}-` +
       `${interaction.user.id.slice(-6)}`;
 
-    const permissionOverwrites =
-      await buildTicketPermissionOverwrites(
-        interaction.guild,
-        interaction.user.id
-      );
-
     const openedAt =
       Date.now();
 
@@ -1054,41 +2144,64 @@ async function handleTicketCreation(
       await interaction.guild.channels.create({
         name:
           ticketName,
-
         type:
           ChannelType.GuildText,
-
         parent:
-          SUPPORT_CATEGORY_ID,
-
+          reservedCategoryId,
         topic:
           `Ticket Owner: ${interaction.user.tag} | ` +
           `User ID: ${interaction.user.id} | ` +
           `Type: ${type} | ` +
           `Opened At: ${openedAt}`,
-
-        permissionOverwrites,
-
+        permissionOverwrites:
+          buildTicketPermissionOverwrites(
+            interaction.guild,
+            interaction.user.id
+          ),
         reason:
           `${type} ticket opened by ${interaction.user.tag}`
       });
 
-    /*
-      A short delay plus a second server fetch closes
-      the small race window where two requests arrive
-      almost at exactly the same time.
-    */
+    if (reservedCategoryId) {
+      releaseCategoryReservation(
+        reservedCategoryId
+      );
+
+      reservedCategoryId =
+        null;
+    }
 
     await sleep(
       350
     );
 
     const postCreationTickets =
-      await getOpenTickets(
-        interaction.guild,
+      getOpenTicketsFromChannels(
+        interaction.guild.channels.cache,
         interaction.user.id,
         type
       );
+
+    if (
+      !postCreationTickets.some(
+        channel =>
+          channel.id ===
+          createdTicketChannel.id
+      )
+    ) {
+      postCreationTickets.push(
+        createdTicketChannel
+      );
+
+      postCreationTickets.sort(
+        (first, second) =>
+          first.createdTimestamp -
+            second.createdTimestamp ||
+          first.id.localeCompare(
+            second.id
+          )
+      );
+    }
 
     const keeper =
       postCreationTickets[0];
@@ -1109,7 +2222,7 @@ async function handleTicketCreation(
             )
         );
 
-      return interaction.editReply({
+      return await interaction.editReply({
         content:
           `❌ You already have an open ${type} ticket: ${keeper}`
       });
@@ -1117,7 +2230,7 @@ async function handleTicketCreation(
 
     if (postCreationTickets.length > 1) {
       console.warn(
-        `A possible cross-process ticket race was detected for user ${interaction.user.id}. Existing channels were preserved to avoid data loss.`
+        `A post-create duplicate race was detected for user ${interaction.user.id}. Existing channels were preserved to avoid data loss.`
       );
     }
 
@@ -1130,6 +2243,20 @@ async function handleTicketCreation(
 
     openingMessageSent =
       true;
+
+    ticketCreateCooldowns.set(
+      creationKey,
+      Date.now() +
+        TICKET_CREATE_COOLDOWN_MS
+    );
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "completed"
+      }
+    );
 
     await interaction.editReply({
       content:
@@ -1165,11 +2292,41 @@ async function handleTicketCreation(
         );
     }
 
+    if (
+      error instanceof
+      ShutdownInProgressError
+    ) {
+      await respondToInteraction(
+        interaction,
+        "⏳ The bot is restarting, so your ticket could not be created. Please try again in a moment."
+      ).catch(
+        () => {}
+      );
+
+      return;
+    }
+
     throw error;
 
   } finally {
-    creatingTickets.delete(
-      creationKey
+    if (reservedCategoryId) {
+      releaseCategoryReservation(
+        reservedCategoryId
+      );
+    }
+
+    if (releaseCreationSlot) {
+      releaseCreationSlot();
+    }
+
+    if (creationKey) {
+      creatingTickets.delete(
+        creationKey
+      );
+    }
+
+    endOperation(
+      operationToken
     );
   }
 }
@@ -1358,12 +2515,10 @@ function buildThreadEmbed(
           }`,
           256
         ),
-
       iconURL:
         message.author.displayAvatarURL({
           extension:
             "png",
-
           size:
             64
         })
@@ -1389,7 +2544,6 @@ async function copyMessageToThread(
       attachment => ({
         attachment:
           attachment.url,
-
         name:
           attachment.name ||
           `attachment-${attachment.id}`
@@ -1404,9 +2558,7 @@ async function copyMessageToThread(
           false
         )
       ],
-
       files,
-
       allowedMentions: {
         parse: []
       }
@@ -1425,7 +2577,6 @@ async function copyMessageToThread(
           true
         )
       ],
-
       allowedMentions: {
         parse: []
       }
@@ -1438,7 +2589,8 @@ async function createDiscordThreadTranscript({
   logMessage,
   ticketChannel,
   messages,
-  closedAt
+  closedAt,
+  onThreadCreated
 }) {
   const timestamp =
     formatThreadTimestamp(
@@ -1455,15 +2607,19 @@ async function createDiscordThreadTranscript({
     await logMessage.startThread({
       name:
         threadName,
-
       autoArchiveDuration:
         ThreadAutoArchiveDuration.OneDay,
-
       reason:
         `Transcript for ${ticketChannel.name}`
     });
 
+  await onThreadCreated(
+    thread
+  );
+
   for (const message of messages) {
+    ensureShutdownDeadlineNotReached();
+
     await copyMessageToThread(
       thread,
       message
@@ -1474,11 +2630,388 @@ async function createDiscordThreadTranscript({
 }
 
 
+async function deleteTranscriptThreadSafely({
+  thread,
+  threadId,
+  transcriptChannel
+}) {
+  let targetThread =
+    thread;
+
+  if (!targetThread && threadId) {
+    targetThread =
+      await client.channels
+        .fetch(
+          threadId
+        )
+        .catch(
+          error => {
+            if (
+              isUnknownDiscordResource(
+                error
+              )
+            ) {
+              return null;
+            }
+
+            throw error;
+          }
+        );
+  }
+
+  if (!targetThread) {
+    return;
+  }
+
+  if (
+    !targetThread.isThread?.() ||
+    targetThread.parentId !==
+      transcriptChannel.id
+  ) {
+    throw new Error(
+      "Refusing to delete a transcript thread that does not belong to the configured transcript channel."
+    );
+  }
+
+  await targetThread.delete(
+    "Incomplete ticket transcript cleanup"
+  );
+}
+
+
+async function deleteTranscriptLogSafely({
+  logMessage,
+  logMessageId,
+  transcriptChannel
+}) {
+  let targetMessage =
+    logMessage;
+
+  if (!targetMessage && logMessageId) {
+    targetMessage =
+      await transcriptChannel.messages
+        .fetch(
+          logMessageId
+        )
+        .catch(
+          error => {
+            if (
+              isUnknownDiscordResource(
+                error
+              )
+            ) {
+              return null;
+            }
+
+            throw error;
+          }
+        );
+  }
+
+  if (!targetMessage) {
+    return;
+  }
+
+  if (
+    targetMessage.channelId !==
+      transcriptChannel.id ||
+    targetMessage.author.id !==
+      client.user.id
+  ) {
+    throw new Error(
+      "Refusing to delete a transcript log message that was not created by this bot in the configured transcript channel."
+    );
+  }
+
+  await targetMessage.delete();
+}
+
+
+async function cleanupIncompleteTranscript({
+  ticketChannel,
+  metadata,
+  transcriptChannel,
+  thread = null,
+  logMessage = null
+}) {
+  try {
+    await deleteTranscriptThreadSafely({
+      thread,
+      threadId:
+        metadata.transcriptThreadId,
+      transcriptChannel
+    });
+
+    await deleteTranscriptLogSafely({
+      logMessage,
+      logMessageId:
+        metadata.transcriptLogMessageId,
+      transcriptChannel
+    });
+
+    await updateTicketTranscriptMetadata(
+      ticketChannel,
+      {},
+      "Cleared incomplete transcript metadata"
+    );
+
+    console.log(
+      `Incomplete transcript state cleaned for ticket ${ticketChannel.id}.`
+    );
+
+    return true;
+
+  } catch (cleanupError) {
+    console.error(
+      `Incomplete transcript cleanup failed for ticket ${ticketChannel.id}:`,
+      cleanupError
+    );
+
+    return false;
+  }
+}
+
+
+function createTranscriptLogEmbed({
+  ticketChannel,
+  metadata,
+  closer,
+  closedByType,
+  closedAt,
+  messageCount
+}) {
+  const openedAt =
+    metadata.openedAt ||
+    ticketChannel.createdTimestamp;
+
+  const ownerText =
+    `<@${metadata.ownerId}> ` +
+    `(${metadata.ownerId})`;
+
+  return new EmbedBuilder()
+    .setTitle(
+      metadata.type === "support"
+        ? "🎫 Support Ticket Closed"
+        : "🤝 Collab Ticket Closed"
+    )
+    .setColor(
+      "#ff0000"
+    )
+    .addFields(
+      {
+        name:
+          "Ticket",
+        value:
+          `#${ticketChannel.name}`,
+        inline:
+          true
+      },
+      {
+        name:
+          "Opened by",
+        value:
+          ownerText,
+        inline:
+          true
+      },
+      {
+        name:
+          "Closed by",
+        value:
+          `${closer} (${closer.id})`,
+        inline:
+          true
+      },
+      {
+        name:
+          "Closed by type",
+        value:
+          closedByType,
+        inline:
+          true
+      },
+      {
+        name:
+          "Opened at",
+        value:
+          formatDate(
+            openedAt
+          ),
+        inline:
+          true
+      },
+      {
+        name:
+          "Closed at",
+        value:
+          formatDate(
+            closedAt
+          ),
+        inline:
+          true
+      },
+      {
+        name:
+          "Messages",
+        value:
+          String(
+            messageCount
+          ),
+        inline:
+          true
+      }
+    )
+    .setFooter({
+      text:
+        "Eternal Blades Ticket Logs"
+    })
+    .setTimestamp();
+}
+
+
+async function fetchTranscriptChannel(
+  guild,
+  type
+) {
+  const transcriptChannelId =
+    getTranscriptChannelId(type);
+
+  if (!transcriptChannelId) {
+    throw new Error(
+      "Transcript channel ID is not configured."
+    );
+  }
+
+  const transcriptChannel =
+    await client.channels.fetch(
+      transcriptChannelId
+    );
+
+  if (
+    !transcriptChannel ||
+    transcriptChannel.type !==
+      ChannelType.GuildText ||
+    transcriptChannel.guild.id !==
+      guild.id
+  ) {
+    throw new Error(
+      "Transcript channel was not found, is invalid or belongs to another guild."
+    );
+  }
+
+  await assertChannelPermissions(
+    transcriptChannel,
+    [
+      {
+        flag:
+          PermissionsBitField.Flags.ViewChannel,
+        name:
+          "View Channel"
+      },
+      {
+        flag:
+          PermissionsBitField.Flags.SendMessages,
+        name:
+          "Send Messages"
+      },
+      {
+        flag:
+          PermissionsBitField.Flags.EmbedLinks,
+        name:
+          "Embed Links"
+      },
+      {
+        flag:
+          PermissionsBitField.Flags.ReadMessageHistory,
+        name:
+          "Read Message History"
+      },
+      {
+        flag:
+          PermissionsBitField.Flags.AttachFiles,
+        name:
+          "Attach Files"
+      },
+      {
+        flag:
+          PermissionsBitField.Flags.CreatePublicThreads,
+        name:
+          "Create Public Threads"
+      },
+      {
+        flag:
+          PermissionsBitField.Flags.SendMessagesInThreads,
+        name:
+          "Send Messages in Threads"
+      }
+    ],
+    "Transcript channel"
+  );
+
+  return transcriptChannel;
+}
+
+
 // ==================================================
-// CLOSE TICKET
+// CLOSE CONFIRMATION
 // ==================================================
 
-async function handleTicketClose(
+function parseCloseConfirmationCustomId(
+  customId
+) {
+  const match =
+    customId.match(
+      /^ticket_close_(confirm|cancel):(\d{17,20}):(\d{17,20}):(\d{17,20})$/
+    );
+
+  if (!match) {
+    return null;
+  }
+
+  return {
+    action:
+      match[1],
+    channelId:
+      match[2],
+    userId:
+      match[3],
+    requestId:
+      match[4]
+  };
+}
+
+
+async function getCloseAuthorization(
+  interaction,
+  metadata
+) {
+  const member =
+    await interaction.guild.members.fetch(
+      interaction.user.id
+    );
+
+  const isStaff =
+    hasStaffRole(
+      member
+    );
+
+  const isTicketOwner =
+    metadata.ownerId ===
+      interaction.user.id;
+
+  return {
+    authorized:
+      isStaff ||
+      isTicketOwner,
+    closedByType:
+      isStaff
+        ? "Staff"
+        : "Ticket Owner"
+  };
+}
+
+
+async function handleTicketCloseRequest(
   interaction
 ) {
   if (
@@ -1488,7 +3021,6 @@ async function handleTicketClose(
     return interaction.reply({
       content:
         "❌ Ticket channel could not be found.",
-
       flags:
         MessageFlags.Ephemeral
     });
@@ -1511,79 +3043,344 @@ async function handleTicketClose(
     return interaction.reply({
       content:
         "❌ This button is not inside a valid Eternal Blades ticket channel.",
-
       flags:
         MessageFlags.Ephemeral
     });
   }
 
-  const member =
-    await interaction.guild.members.fetch(
-      interaction.user.id
+  const authorization =
+    await getCloseAuthorization(
+      interaction,
+      metadata
     );
 
-  const isStaff =
-    hasStaffRole(
-      member
-    );
-
-  const isTicketOwner =
-    metadata.ownerId ===
-      interaction.user.id;
-
-  if (
-    !isStaff &&
-    !isTicketOwner
-  ) {
+  if (!authorization.authorized) {
     return interaction.reply({
       content:
         "❌ Only the ticket creator or authorized staff members can close this ticket.",
-
       flags:
         MessageFlags.Ephemeral
     });
   }
 
-  const closedByType =
-    isStaff
-      ? "Staff"
-      : "Ticket Owner";
-
-  const ticketChannel =
-    interaction.channel;
-
-  const ticketChannelId =
-    ticketChannel.id;
-
-  if (
-    closingTickets.has(
-      ticketChannelId
-    )
+  for (
+    const [
+      requestId,
+      confirmation
+    ]
+    of pendingCloseConfirmations
   ) {
-    return interaction.reply({
-      content:
-        "⏳ This ticket is already being closed.",
-
-      flags:
-        MessageFlags.Ephemeral
-    });
+    if (
+      confirmation.channelId ===
+        interaction.channel.id &&
+      confirmation.userId ===
+        interaction.user.id
+    ) {
+      pendingCloseConfirmations.delete(
+        requestId
+      );
+    }
   }
 
-  closingTickets.add(
-    ticketChannelId
+  const requestId =
+    interaction.id;
+
+  pendingCloseConfirmations.set(
+    requestId,
+    {
+      channelId:
+        interaction.channel.id,
+      userId:
+        interaction.user.id,
+      expiresAt:
+        Date.now() +
+        CLOSE_CONFIRMATION_TTL_MS
+    }
   );
 
-  let logMessage =
-    null;
+  const confirmButton =
+    new ButtonBuilder()
+      .setCustomId(
+        `ticket_close_confirm:${interaction.channel.id}:${interaction.user.id}:${requestId}`
+      )
+      .setLabel(
+        "Confirm Close"
+      )
+      .setStyle(
+        ButtonStyle.Danger
+      );
 
-  let transcriptThread =
+  const cancelButton =
+    new ButtonBuilder()
+      .setCustomId(
+        `ticket_close_cancel:${interaction.channel.id}:${interaction.user.id}:${requestId}`
+      )
+      .setLabel(
+        "Cancel"
+      )
+      .setStyle(
+        ButtonStyle.Secondary
+      );
+
+  return interaction.reply({
+    content:
+      "Are you sure you want to close this ticket?",
+    components: [
+      new ActionRowBuilder()
+        .addComponents(
+          confirmButton,
+          cancelButton
+        )
+    ],
+    flags:
+      MessageFlags.Ephemeral
+  });
+}
+
+
+async function handleTicketCloseCancel(
+  interaction,
+  confirmationId
+) {
+  const parsed =
+    parseCloseConfirmationCustomId(
+      confirmationId
+    );
+
+  const pending =
+    parsed
+      ? pendingCloseConfirmations.get(
+          parsed.requestId
+        )
+      : null;
+
+  const valid =
+    parsed?.action === "cancel" &&
+    pending &&
+    pending.expiresAt >
+      Date.now() &&
+    parsed.userId ===
+      interaction.user.id &&
+    parsed.channelId ===
+      interaction.channelId &&
+    pending.userId ===
+      interaction.user.id &&
+    pending.channelId ===
+      interaction.channelId;
+
+  if (!valid) {
+    return interaction.reply({
+      content:
+        "❌ This ticket closure confirmation is invalid or has expired.",
+      flags:
+        MessageFlags.Ephemeral
+    });
+  }
+
+  pendingCloseConfirmations.delete(
+    parsed.requestId
+  );
+
+  return interaction.update({
+    content:
+      "Ticket closure cancelled.",
+    components: []
+  });
+}
+
+
+async function retryCompletedTicketDeletion({
+  interaction,
+  ticketChannel,
+  metadata
+}) {
+  const transcriptUrl =
+    getTranscriptUrl(
+      interaction.guild.id,
+      metadata.transcriptThreadId
+    );
+
+  const linkText =
+    transcriptUrl
+      ? ` [VIEW TRANSCRIPT](${transcriptUrl})`
+      : "";
+
+  await interaction.editReply({
+    content:
+      "ℹ️ The transcript has already been saved. Retrying ticket channel deletion..." +
+      linkText,
+    components: []
+  });
+
+  ensureShutdownDeadlineNotReached();
+
+  try {
+    await ticketChannel.delete(
+      `Previously archived ticket deletion retried by ${interaction.user.tag}`
+    );
+
+  } catch (deleteError) {
+    console.error(
+      `Archived ticket channel deletion retry failed for ${ticketChannel.id}:`,
+      deleteError
+    );
+
+    await interaction.editReply({
+      content:
+        "⚠️ The transcript has already been saved, but the ticket channel could not be deleted. Please contact a staff member." +
+        linkText,
+      components: []
+    }).catch(
+      () => {}
+    );
+  }
+}
+
+
+// ==================================================
+// CONFIRMED CLOSE AND TRANSCRIPT
+// ==================================================
+
+async function handleTicketCloseConfirm(
+  interaction,
+  confirmationId
+) {
+  const parsed =
+    parseCloseConfirmationCustomId(
+      confirmationId
+    );
+
+  const operationToken =
+    beginOperation({
+      kind:
+        "close",
+      stage:
+        "confirming",
+      userId:
+        interaction.user.id,
+      channelId:
+        interaction.channelId
+    });
+
+  let ticketChannelId =
     null;
 
   try {
-    await interaction.deferReply({
-      flags:
-        MessageFlags.Ephemeral
+    const pending =
+      parsed
+        ? pendingCloseConfirmations.get(
+            parsed.requestId
+          )
+        : null;
+
+    const valid =
+      parsed?.action === "confirm" &&
+      pending &&
+      pending.expiresAt >
+        Date.now() &&
+      parsed.userId ===
+        interaction.user.id &&
+      parsed.channelId ===
+        interaction.channelId &&
+      pending.userId ===
+        interaction.user.id &&
+      pending.channelId ===
+        interaction.channelId;
+
+    if (!valid) {
+      return await interaction.reply({
+        content:
+          "❌ This ticket closure confirmation is invalid or has expired.",
+        flags:
+          MessageFlags.Ephemeral
+      });
+    }
+
+    pendingCloseConfirmations.delete(
+      parsed.requestId
+    );
+
+    if (
+      !interaction.guild ||
+      !interaction.channel
+    ) {
+      return await interaction.update({
+        content:
+          "❌ Ticket channel could not be found.",
+        components: []
+      });
+    }
+
+    let metadata;
+
+    try {
+      metadata =
+        validateTicketChannel(
+          interaction.channel
+        );
+
+    } catch (validationError) {
+      console.error(
+        "Confirmed close metadata validation error:",
+        validationError
+      );
+
+      return await interaction.update({
+        content:
+          "❌ This is no longer a valid Eternal Blades ticket channel.",
+        components: []
+      });
+    }
+
+    await interaction.update({
+      content:
+        "⏳ Closing ticket...",
+      components: []
     });
+
+    const authorization =
+      await getCloseAuthorization(
+        interaction,
+        metadata
+      );
+
+    if (!authorization.authorized) {
+      return await interaction.editReply({
+        content:
+          "❌ You are no longer authorized to close this ticket.",
+        components: []
+      });
+    }
+
+    const ticketChannel =
+      interaction.channel;
+
+    ticketChannelId =
+      ticketChannel.id;
+
+    if (
+      closingTickets.has(
+        ticketChannelId
+      )
+    ) {
+      return await interaction.editReply({
+        content:
+          "⏳ This ticket is already being closed.",
+        components: []
+      });
+    }
+
+    closingTickets.add(
+      ticketChannelId
+    );
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "validating"
+      }
+    );
 
     await assertChannelPermissions(
       ticketChannel,
@@ -1610,79 +3407,77 @@ async function handleTicketClose(
       "Ticket channel"
     );
 
-    const transcriptChannelId =
-      getTranscriptChannelId(
-        metadata.type
-      );
-
-    if (!transcriptChannelId) {
-      throw new Error(
-        "Transcript channel ID is not configured."
-      );
-    }
-
-    const transcriptChannel =
-      await client.channels.fetch(
-        transcriptChannelId
+    metadata =
+      validateTicketChannel(
+        ticketChannel
       );
 
     if (
-      !transcriptChannel ||
-      transcriptChannel.type !==
-        ChannelType.GuildText
+      metadata.transcriptStatus ===
+      "complete"
     ) {
-      throw new Error(
-        "Transcript channel was not found or is not a guild text channel."
+      updateOperation(
+        operationToken,
+        {
+          stage:
+            "delete-retry"
+        }
       );
+
+      await retryCompletedTicketDeletion({
+        interaction,
+        ticketChannel,
+        metadata
+      });
+
+      return;
     }
 
-    await assertChannelPermissions(
-      transcriptChannel,
-      [
+    const transcriptChannel =
+      await fetchTranscriptChannel(
+        interaction.guild,
+        metadata.type
+      );
+
+    if (
+      metadata.transcriptStatus ===
+      "creating"
+    ) {
+      updateOperation(
+        operationToken,
         {
-          flag:
-            PermissionsBitField.Flags.ViewChannel,
-          name:
-            "View Channel"
-        },
-        {
-          flag:
-            PermissionsBitField.Flags.SendMessages,
-          name:
-            "Send Messages"
-        },
-        {
-          flag:
-            PermissionsBitField.Flags.EmbedLinks,
-          name:
-            "Embed Links"
-        },
-        {
-          flag:
-            PermissionsBitField.Flags.ReadMessageHistory,
-          name:
-            "Read Message History"
-        },
-        {
-          flag:
-            PermissionsBitField.Flags.AttachFiles,
-          name:
-            "Attach Files"
-        },
-        {
-          flag:
-            PermissionsBitField.Flags.CreatePublicThreads,
-          name:
-            "Create Public Threads"
-        },
-        {
-          flag:
-            PermissionsBitField.Flags.SendMessagesInThreads,
-          name:
-            "Send Messages in Threads"
+          stage:
+            "recovering"
         }
-      ],
-      "Transcript channel"
+      );
+
+      const recovered =
+        await cleanupIncompleteTranscript({
+          ticketChannel,
+          metadata,
+          transcriptChannel
+        });
+
+      if (!recovered) {
+        return await interaction.editReply({
+          content:
+            "❌ An incomplete transcript from an earlier attempt could not be cleaned safely. The ticket was NOT deleted. Please contact a staff member.",
+          components: []
+        });
+      }
+
+      metadata =
+        validateTicketChannel(
+          ticketChannel
+        );
+    }
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "fetching-messages"
+      }
     );
 
     const allMessages =
@@ -1701,125 +3496,72 @@ async function handleTicketClose(
     const closedAt =
       Date.now();
 
-    const openedAt =
-      metadata.openedAt ||
-      ticketChannel.createdTimestamp;
+    const transcriptState = {
+      status:
+        "creating",
+      threadId:
+        null,
+      logMessageId:
+        null,
+      closedAt,
+      closedById:
+        interaction.user.id,
+      deletePending:
+        false
+    };
 
-    const ownerText =
-      `<@${metadata.ownerId}> ` +
-      `(${metadata.ownerId})`;
+    let logMessage =
+      null;
 
-    const logEmbed =
-      new EmbedBuilder()
-        .setTitle(
-          metadata.type === "support"
-            ? "🎫 Support Ticket Closed"
-            : "🤝 Collab Ticket Closed"
-        )
-        .setColor(
-          "#ff0000"
-        )
-        .addFields(
-          {
-            name:
-              "Ticket",
+    let transcriptThread =
+      null;
 
-            value:
-              `#${ticketChannel.name}`,
-
-            inline:
-              true
-          },
-
-          {
-            name:
-              "Opened by",
-
-            value:
-              ownerText,
-
-            inline:
-              true
-          },
-
-          {
-            name:
-              "Closed by",
-
-            value:
-              `${interaction.user} (${interaction.user.id})`,
-
-            inline:
-              true
-          },
-
-          {
-            name:
-              "Closed by type",
-
-            value:
-              closedByType,
-
-            inline:
-              true
-          },
-
-          {
-            name:
-              "Opened at",
-
-            value:
-              formatDate(
-                openedAt
-              ),
-
-            inline:
-              true
-          },
-
-          {
-            name:
-              "Closed at",
-
-            value:
-              formatDate(
-                closedAt
-              ),
-
-            inline:
-              true
-          },
-
-          {
-            name:
-              "Messages",
-
-            value:
-              String(
-                transcriptMessages.length
-              ),
-
-            inline:
-              true
-          }
-        )
-        .setFooter({
-          text:
-            "Eternal Blades Ticket Logs"
-        })
-        .setTimestamp();
+    await updateTicketTranscriptMetadata(
+      ticketChannel,
+      transcriptState,
+      "Ticket transcript creation started"
+    );
 
     try {
+      updateOperation(
+        operationToken,
+        {
+          stage:
+            "creating-transcript"
+        }
+      );
+
+      const logEmbed =
+        createTranscriptLogEmbed({
+          ticketChannel,
+          metadata,
+          closer:
+            interaction.user,
+          closedByType:
+            authorization.closedByType,
+          closedAt,
+          messageCount:
+            transcriptMessages.length
+        });
+
       logMessage =
         await transcriptChannel.send({
           allowedMentions: {
             parse: []
           },
-
           embeds: [
             logEmbed
           ]
         });
+
+      transcriptState.logMessageId =
+        logMessage.id;
+
+      await updateTicketTranscriptMetadata(
+        ticketChannel,
+        transcriptState,
+        "Ticket transcript log created"
+      );
 
       transcriptThread =
         await createDiscordThreadTranscript({
@@ -1827,8 +3569,21 @@ async function handleTicketClose(
           ticketChannel,
           messages:
             transcriptMessages,
-          closedAt
+          closedAt,
+          onThreadCreated:
+            async thread => {
+              transcriptState.threadId =
+                thread.id;
+
+              await updateTicketTranscriptMetadata(
+                ticketChannel,
+                transcriptState,
+                "Ticket transcript thread created"
+              );
+            }
         });
+
+      ensureShutdownDeadlineNotReached();
 
       const viewThreadButton =
         new ButtonBuilder()
@@ -1842,8 +3597,10 @@ async function handleTicketClose(
             ButtonStyle.Link
           )
           .setURL(
-            `https://discord.com/channels/` +
-            `${interaction.guild.id}/${transcriptThread.id}`
+            getTranscriptUrl(
+              interaction.guild.id,
+              transcriptThread.id
+            )
           );
 
       await logMessage.edit({
@@ -1855,50 +3612,76 @@ async function handleTicketClose(
         ]
       });
 
+      ensureShutdownDeadlineNotReached();
+
+      await updateTicketTranscriptMetadata(
+        ticketChannel,
+        {
+          ...transcriptState,
+          status:
+            "complete",
+          deletePending:
+            true
+        },
+        "Ticket transcript completed"
+      );
+
     } catch (transcriptError) {
       console.error(
         "Transcript creation error:",
         transcriptError
       );
 
-      if (transcriptThread) {
-        await transcriptThread
-          .delete()
-          .catch(
-            cleanupError =>
-              console.error(
-                "Transcript thread cleanup error:",
-                cleanupError
-              )
-          );
-      }
+      const currentMetadata =
+        parseTicketMetadata(
+          ticketChannel.topic || ""
+        );
 
-      if (logMessage) {
-        await logMessage
-          .delete()
-          .catch(
-            cleanupError =>
-              console.error(
-                "Transcript log cleanup error:",
-                cleanupError
-              )
-          );
-      }
+      await cleanupIncompleteTranscript({
+        ticketChannel,
+        metadata: {
+          ...currentMetadata,
+          transcriptThreadId:
+            currentMetadata.transcriptThreadId ||
+            transcriptThread?.id ||
+            transcriptState.threadId,
+          transcriptLogMessageId:
+            currentMetadata.transcriptLogMessageId ||
+            logMessage?.id ||
+            transcriptState.logMessageId
+        },
+        transcriptChannel,
+        thread:
+          transcriptThread,
+        logMessage
+      });
 
-      return interaction.editReply({
+      return await interaction.editReply({
         content:
-          "❌ The Discord transcript could not be completed, so the ticket was NOT deleted. Check the transcript-channel permissions and Railway logs."
+          "❌ The Discord transcript could not be completed, so the ticket was NOT deleted. Check the transcript-channel permissions and Railway logs.",
+        components: []
       });
     }
 
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "deleting"
+      }
+    );
+
     await interaction.editReply({
       content:
-        "✅ Discord transcript saved successfully. This ticket will close in 3 seconds."
+        "✅ Discord transcript saved successfully. This ticket will close in 3 seconds.",
+      components: []
     });
 
     await sleep(
       3000
     );
+
+    ensureShutdownDeadlineNotReached();
 
     try {
       await ticketChannel.delete(
@@ -1911,17 +3694,31 @@ async function handleTicketClose(
         deleteError
       );
 
-      return interaction.editReply({
+      const transcriptUrl =
+        getTranscriptUrl(
+          interaction.guild.id,
+          transcriptThread.id
+        );
+
+      return await interaction.editReply({
         content:
-          "⚠️ The transcript was saved, but the ticket channel could not be deleted. Check the bot's Manage Channels permission."
+          "⚠️ The transcript has already been saved, but the ticket channel could not be deleted. Please contact a staff member. " +
+          `[VIEW TRANSCRIPT](${transcriptUrl})`,
+        components: []
       }).catch(
         () => {}
       );
     }
 
   } finally {
-    closingTickets.delete(
-      ticketChannelId
+    if (ticketChannelId) {
+      closingTickets.delete(
+        ticketChannelId
+      );
+    }
+
+    endOperation(
+      operationToken
     );
   }
 }
@@ -1933,16 +3730,10 @@ async function handleTicketClose(
 
 client.once(
   Events.ClientReady,
-
   async readyClient => {
     console.log(
       `${readyClient.user.tag} online!`
     );
-
-    /*
-      Each panel has its own error boundary, so one
-      panel cannot prevent the other one from loading.
-    */
 
     await Promise.allSettled([
       setupLinksPanel(
@@ -1960,18 +3751,14 @@ client.once(
 
 client.on(
   Events.InteractionCreate,
-
   async interaction => {
     try {
       if (isShuttingDown) {
         if (interaction.isRepliable()) {
-          await interaction.reply({
-            content:
-              "⏳ The bot is restarting. Please try again in a moment.",
-
-            flags:
-              MessageFlags.Ephemeral
-          }).catch(
+          await respondToInteraction(
+            interaction,
+            "⏳ The bot is restarting. Please try again in a moment."
+          ).catch(
             () => {}
           );
         }
@@ -1991,13 +3778,42 @@ client.on(
         return;
       }
 
+      if (!interaction.isButton()) {
+        return;
+      }
+
       if (
-        interaction.isButton() &&
         interaction.customId ===
-          "close_ticket"
+        "close_ticket"
       ) {
-        await handleTicketClose(
+        await handleTicketCloseRequest(
           interaction
+        );
+
+        return;
+      }
+
+      if (
+        interaction.customId.startsWith(
+          "ticket_close_confirm:"
+        )
+      ) {
+        await handleTicketCloseConfirm(
+          interaction,
+          interaction.customId
+        );
+
+        return;
+      }
+
+      if (
+        interaction.customId.startsWith(
+          "ticket_close_cancel:"
+        )
+      ) {
+        await handleTicketCloseCancel(
+          interaction,
+          interaction.customId
         );
       }
 
@@ -2007,31 +3823,12 @@ client.on(
         error
       );
 
-      if (interaction.deferred) {
-        await interaction.editReply({
-          content:
-            "❌ Something went wrong. The issue was recorded in the Railway logs."
-        }).catch(
-          () => {}
-        );
-
-        return;
-      }
-
-      if (
-        !interaction.replied &&
-        interaction.isRepliable()
-      ) {
-        await interaction.reply({
-          content:
-            "❌ Something went wrong. The issue was recorded in the Railway logs.",
-
-          flags:
-            MessageFlags.Ephemeral
-        }).catch(
-          () => {}
-        );
-      }
+      await respondToInteraction(
+        interaction,
+        "❌ Something went wrong. The issue was recorded in the Railway logs."
+      ).catch(
+        () => {}
+      );
     }
   }
 );
@@ -2076,7 +3873,6 @@ process.once(
       {
         exitCode:
           1,
-
         waitForOperations:
           false
       }
@@ -2096,90 +3892,122 @@ async function waitForActiveTicketOperations(
     Date.now();
 
   while (
-    creatingTickets.size > 0 ||
-    closingTickets.size > 0
+    activeOperations.size > 0
   ) {
     if (
       Date.now() - startedAt >=
       maximumWaitMilliseconds
     ) {
+      shutdownTimedOut =
+        true;
+
       console.warn(
-        "Shutdown wait limit reached. Active ticket operations may be interrupted."
+        "Shutdown wait limit reached. Active ticket operations will not be allowed to delete ticket channels.",
+        getOperationCounts()
       );
 
-      return;
+      return false;
     }
 
     await sleep(
       250
     );
   }
+
+  return true;
 }
 
 
-async function gracefulShutdown(
+function requestProcessExit(exitCode) {
+  if (processExitRequested) {
+    return;
+  }
+
+  processExitRequested =
+    true;
+
+  process.exit(
+    exitCode
+  );
+}
+
+
+function gracefulShutdown(
   signal,
   {
     exitCode = 0,
     waitForOperations = true
   } = {}
 ) {
-  if (isShuttingDown) {
-    return;
+  if (shutdownPromise) {
+    return shutdownPromise;
   }
 
   isShuttingDown =
     true;
 
+  cancelQueuedTicketCreations();
+
+  const initialCounts =
+    getOperationCounts();
+
   console.log(
-    `${signal} received. Eternal Blades is shutting down safely...`
+    `${signal} received. Eternal Blades is shutting down safely...`,
+    initialCounts
   );
 
-  const forcedExitTimer =
-    setTimeout(
-      () => {
+  shutdownPromise =
+    (async () => {
+      const forcedExitTimer =
+        setTimeout(
+          () => {
+            console.error(
+              "Graceful shutdown timed out. Forcing process exit.",
+              getOperationCounts()
+            );
+
+            requestProcessExit(
+              exitCode || 1
+            );
+          },
+          SHUTDOWN_MAX_WAIT_MS +
+          5000
+        );
+
+      forcedExitTimer.unref();
+
+      try {
+        if (waitForOperations) {
+          await waitForActiveTicketOperations(
+            SHUTDOWN_MAX_WAIT_MS
+          );
+        }
+
+        client.destroy();
+
+        console.log(
+          "Eternal Blades shutdown completed.",
+          getOperationCounts()
+        );
+
+      } catch (error) {
         console.error(
-          "Graceful shutdown timed out. Forcing process exit."
+          "Graceful shutdown error:",
+          error
         );
 
-        process.exit(
-          exitCode || 1
+      } finally {
+        clearTimeout(
+          forcedExitTimer
         );
-      },
-      SHUTDOWN_MAX_WAIT_MS +
-      5000
-    );
 
-  forcedExitTimer.unref();
+        requestProcessExit(
+          exitCode
+        );
+      }
+    })();
 
-  try {
-    if (waitForOperations) {
-      await waitForActiveTicketOperations(
-        SHUTDOWN_MAX_WAIT_MS
-      );
-    }
-
-    client.destroy();
-
-    console.log(
-      "Eternal Blades shutdown completed."
-    );
-
-  } catch (error) {
-    console.error(
-      "Graceful shutdown error:",
-      error
-    );
-
-  } finally {
-    clearTimeout(
-      forcedExitTimer
-    );
-
-    process.exit(
-      exitCode
-    );
-  }
+  return shutdownPromise;
 }
 
 
@@ -2216,7 +4044,6 @@ process.once(
       {
         exitCode:
           1,
-
         waitForOperations:
           false
       }
@@ -2237,7 +4064,7 @@ if (!token) {
     "TOKEN environment variable is missing or empty."
   );
 
-  process.exit(1);
+  requestProcessExit(1);
 }
 
 
@@ -2255,7 +4082,6 @@ client.login(
       {
         exitCode:
           1,
-
         waitForOperations:
           false
       }
