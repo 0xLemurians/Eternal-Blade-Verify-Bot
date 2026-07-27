@@ -24,8 +24,8 @@ import {
 
 import {
   reportError,
-  reportSystemEvent,
-  setupErrorReporter
+  setupErrorReporter,
+  updateBotStatus
 } from "./services/errorReporter.js";
 
 import {
@@ -3977,7 +3977,7 @@ client.once(
             "rejected"
       ).length;
 
-    await reportSystemEvent({
+    await updateBotStatus({
       title:
         failedReadyTaskCount === 0
           ? "✅ Eternal Blades Online"
@@ -4261,7 +4261,7 @@ function gracefulShutdown(
         stopTicketStats();
 
         const shutdownReportPromise =
-          reportSystemEvent({
+          updateBotStatus({
             title:
               "⏳ Eternal Blades Shutting Down",
             description:
