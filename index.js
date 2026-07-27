@@ -22,6 +22,18 @@ import {
   upsertPanelMessage
 } from "./utils/panelMessage.js";
 
+import {
+  reportError,
+  reportSystemEvent,
+  setupErrorReporter
+} from "./services/errorReporter.js";
+
+import {
+  scheduleTicketStatsRefresh,
+  setupTicketStats,
+  stopTicketStats
+} from "./services/ticketStats.js";
+
 
 // ==================================================
 // DISCORD CLIENT
@@ -1318,6 +1330,16 @@ async function validateTicketCategory(
       error
     );
 
+    void reportError({
+      title:
+        "Ticket Category Validation Failed",
+      error,
+      context: {
+        type,
+        categoryId
+      }
+    });
+
     return false;
   }
 }
@@ -1585,6 +1607,12 @@ async function setupTicketPanel() {
       "Ticket panel setup error:",
       error
     );
+
+    void reportError({
+      title:
+        "Ticket Panel Setup Failed",
+      error
+    });
   }
 }
 
@@ -2276,6 +2304,10 @@ async function handleTicketCreation(
 
     openingMessageSent =
       true;
+
+    scheduleTicketStatsRefresh(
+      "ticket-created"
+    );
 
     ticketCreateCooldowns.set(
       creationKey,
@@ -3294,11 +3326,28 @@ async function retryCompletedTicketDeletion({
       `Previously archived ticket deletion retried by ${interaction.user.tag}`
     );
 
+    scheduleTicketStatsRefresh(
+      "archived-ticket-deleted"
+    );
+
   } catch (deleteError) {
     console.error(
       `Archived ticket channel deletion retry failed for ${ticketChannel.id}:`,
       deleteError
     );
+
+    void reportError({
+      title:
+        "Archived Ticket Delete Retry Failed",
+      error:
+        deleteError,
+      context: {
+        ticketChannelId:
+          ticketChannel.id,
+        closerId:
+          interaction.user.id
+      }
+    });
 
     await interaction.editReply({
       content:
@@ -3720,11 +3769,30 @@ async function handleTicketCloseConfirm(
         `[Ticket ${ticketChannel.id}] complete metadata saved`
       );
 
+      scheduleTicketStatsRefresh(
+        "ticket-closed"
+      );
+
     } catch (transcriptError) {
       console.error(
         "Transcript creation error:",
         transcriptError
       );
+
+      void reportError({
+        title:
+          "Transcript Creation Failed",
+        error:
+          transcriptError,
+        context: {
+          ticketChannelId:
+            ticketChannel.id,
+          ticketType:
+            metadata.type,
+          closerId:
+            interaction.user.id
+        }
+      });
 
       const currentMetadata =
         parseTicketMetadata(
@@ -3793,11 +3861,30 @@ async function handleTicketCloseConfirm(
         `[Ticket ${ticketChannel.id}] ticket deleted`
       );
 
+      scheduleTicketStatsRefresh(
+        "ticket-channel-deleted"
+      );
+
     } catch (deleteError) {
       console.error(
         "Ticket delete error:",
         deleteError
       );
+
+      void reportError({
+        title:
+          "Ticket Channel Delete Failed",
+        error:
+          deleteError,
+        context: {
+          ticketChannelId:
+            ticketChannel.id,
+          ticketType:
+            metadata.type,
+          closerId:
+            interaction.user.id
+        }
+      });
 
       const transcriptUrl =
         getTranscriptUrl(
@@ -3840,12 +3927,70 @@ client.once(
       `${readyClient.user.tag} online!`
     );
 
-    await Promise.allSettled([
-      setupLinksPanel(
-        readyClient
-      ),
-      setupTicketPanel()
-    ]);
+    await setupErrorReporter(
+      readyClient
+    ).catch(
+      error =>
+        console.error(
+          "Error reporter setup error:",
+          error
+        )
+    );
+
+    const setupResults =
+      await Promise.allSettled([
+        setupLinksPanel(
+          readyClient
+        ),
+        setupTicketPanel(),
+        setupTicketStats(
+          readyClient
+        )
+      ]);
+
+    for (
+      const result
+      of setupResults
+    ) {
+      if (
+        result.status ===
+        "rejected"
+      ) {
+        console.error(
+          "Ready task failed:",
+          result.reason
+        );
+
+        void reportError({
+          title:
+            "Bot Ready Task Failed",
+          error:
+            result.reason
+        });
+      }
+    }
+
+    const failedReadyTaskCount =
+      setupResults.filter(
+        result =>
+          result.status ===
+            "rejected"
+      ).length;
+
+    await reportSystemEvent({
+      title:
+        failedReadyTaskCount === 0
+          ? "✅ Eternal Blades Online"
+          : "⚠️ Eternal Blades Online with Setup Warnings",
+      description:
+        failedReadyTaskCount === 0
+          ? "The bot started successfully and completed its startup checks."
+          : `The bot started, but ${failedReadyTaskCount} startup task(s) failed. Check the error reports above.`,
+      color:
+        failedReadyTaskCount === 0
+          ? "#2ecc71"
+          : "#f1c40f"
+    });
   }
 );
 
@@ -3928,6 +4073,24 @@ client.on(
         error
       );
 
+      void reportError({
+        title:
+          "Discord Interaction Failed",
+        error,
+        context: {
+          interactionId:
+            interaction.id,
+          interactionType:
+            interaction.type,
+          channelId:
+            interaction.channelId,
+          userId:
+            interaction.user?.id || null,
+          customId:
+            interaction.customId || null
+        }
+      });
+
       await respondToInteraction(
         interaction,
         "❌ Something went wrong. The issue was recorded in the Railway logs."
@@ -3950,6 +4113,12 @@ client.on(
       "Discord client error:",
       error
     );
+
+    void reportError({
+      title:
+        "Discord Client Error",
+      error
+    });
   }
 );
 
@@ -3972,6 +4141,13 @@ process.once(
       "Unhandled promise rejection:",
       reason
     );
+
+    void reportError({
+      title:
+        "Unhandled Promise Rejection",
+      error:
+        reason
+    });
 
     void gracefulShutdown(
       "UNHANDLED_REJECTION",
@@ -4082,11 +4258,30 @@ function gracefulShutdown(
       forcedExitTimer.unref();
 
       try {
+        stopTicketStats();
+
+        const shutdownReportPromise =
+          reportSystemEvent({
+            title:
+              "⏳ Eternal Blades Shutting Down",
+            description:
+              `${signal} received. Active ticket operations: ${initialCounts.total}.`,
+            color:
+              "#f1c40f"
+          });
+
         if (waitForOperations) {
           await waitForActiveTicketOperations(
             SHUTDOWN_MAX_WAIT_MS
           );
         }
+
+        await Promise.race([
+          shutdownReportPromise,
+          sleep(
+            1000
+          )
+        ]);
 
         client.destroy();
 
@@ -4143,6 +4338,12 @@ process.once(
       "Uncaught exception:",
       error
     );
+
+    void reportError({
+      title:
+        "Uncaught Exception",
+      error
+    });
 
     void gracefulShutdown(
       "UNCAUGHT_EXCEPTION",
