@@ -1589,6 +1589,34 @@ async function setupTicketPanel() {
 }
 
 
+async function resetTicketPanelSelection(
+  interaction
+) {
+  if (
+    !interaction.message ||
+    interaction.message.author.id !==
+      client.user.id ||
+    interaction.message.channelId !==
+      OPEN_TICKET_CHANNEL_ID
+  ) {
+    return;
+  }
+
+  try {
+    await interaction.message.edit({
+      components:
+        createTicketPanel().components
+    });
+
+  } catch (error) {
+    console.warn(
+      "Ticket panel selection reset failed:",
+      error
+    );
+  }
+}
+
+
 // ==================================================
 // TICKET OPENING MESSAGE
 // ==================================================
@@ -1635,6 +1663,7 @@ function createTicketOpeningPayload(
             "📌 Please include:",
           value:
             [
+              "\u200B",
               "• A clear explanation of the problem",
               "• Screenshots or relevant files",
               "• The steps that caused the issue",
@@ -1647,7 +1676,7 @@ function createTicketOpeningPayload(
           name:
             "⏳ Response time",
           value:
-            "Please remain patient and avoid repeatedly mentioning staff members.",
+            "\u200B\nPlease remain patient and avoid repeatedly mentioning staff members.",
           inline:
             false
         }
@@ -1681,7 +1710,7 @@ function createTicketOpeningPayload(
             "📋 Share with us:",
           value:
             [
-              "",
+              "\u200B",
               "• Project or community name",
               "• Official website and social links",
               "• Your collaboration idea",
@@ -1693,8 +1722,8 @@ function createTicketOpeningPayload(
         {
           name:
             "⚠️ Important",
-         value:
-           "\nPlease keep it genuine and clear. We’ll get back to you as soon as we can.",
+          value:
+            "\u200B\nPlease keep it genuine and clear. We’ll get back to you as soon as we can.",
           inline:
             false
         }
@@ -1879,6 +1908,10 @@ async function handleTicketCreation(
       flags:
         MessageFlags.Ephemeral
     });
+
+    await resetTicketPanelSelection(
+      interaction
+    );
 
     if (
       ticketGuildId &&
