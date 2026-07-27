@@ -2613,7 +2613,7 @@ async function createDiscordThreadTranscript({
         `Transcript for ${ticketChannel.name}`
     });
 
-  await onThreadCreated(
+  onThreadCreated(
     thread
   );
 
@@ -2630,56 +2630,7 @@ async function createDiscordThreadTranscript({
 }
 
 
-async function deleteTranscriptThreadSafely({
-  thread,
-  threadId,
-  transcriptChannel
-}) {
-  let targetThread =
-    thread;
-
-  if (!targetThread && threadId) {
-    targetThread =
-      await client.channels
-        .fetch(
-          threadId
-        )
-        .catch(
-          error => {
-            if (
-              isUnknownDiscordResource(
-                error
-              )
-            ) {
-              return null;
-            }
-
-            throw error;
-          }
-        );
-  }
-
-  if (!targetThread) {
-    return;
-  }
-
-  if (
-    !targetThread.isThread?.() ||
-    targetThread.parentId !==
-      transcriptChannel.id
-  ) {
-    throw new Error(
-      "Refusing to delete a transcript thread that does not belong to the configured transcript channel."
-    );
-  }
-
-  await targetThread.delete(
-    "Incomplete ticket transcript cleanup"
-  );
-}
-
-
-async function deleteTranscriptLogSafely({
+async function resolveTranscriptLogSafely({
   logMessage,
   logMessageId,
   transcriptChannel
@@ -2709,7 +2660,7 @@ async function deleteTranscriptLogSafely({
   }
 
   if (!targetMessage) {
-    return;
+    return null;
   }
 
   if (
@@ -2719,11 +2670,85 @@ async function deleteTranscriptLogSafely({
       client.user.id
   ) {
     throw new Error(
-      "Refusing to delete a transcript log message that was not created by this bot in the configured transcript channel."
+      "Refusing to use a transcript log message that was not created by this bot in the configured transcript channel."
     );
   }
 
-  await targetMessage.delete();
+  return targetMessage;
+}
+
+
+async function resolveTranscriptThreadSafely({
+  thread,
+  threadId,
+  logMessage,
+  transcriptChannel
+}) {
+  let targetThread =
+    thread;
+
+  if (!targetThread && threadId) {
+    targetThread =
+      await client.channels
+        .fetch(
+          threadId
+        )
+        .catch(
+          error => {
+            if (
+              isUnknownDiscordResource(
+                error
+              )
+            ) {
+              return null;
+            }
+
+            throw error;
+          }
+        );
+  }
+
+  if (!targetThread && logMessage?.thread) {
+    targetThread =
+      logMessage.thread;
+  }
+
+  if (!targetThread && logMessage?.id) {
+    targetThread =
+      await client.channels
+        .fetch(
+          logMessage.id
+        )
+        .catch(
+          error => {
+            if (
+              isUnknownDiscordResource(
+                error
+              )
+            ) {
+              return null;
+            }
+
+            throw error;
+          }
+        );
+  }
+
+  if (!targetThread) {
+    return null;
+  }
+
+  if (
+    !targetThread.isThread?.() ||
+    targetThread.parentId !==
+      transcriptChannel.id
+  ) {
+    throw new Error(
+      "Refusing to use a transcript thread that does not belong to the configured transcript channel."
+    );
+  }
+
+  return targetThread;
 }
 
 
@@ -2732,28 +2757,45 @@ async function cleanupIncompleteTranscript({
   metadata,
   transcriptChannel,
   thread = null,
-  logMessage = null
+  logMessage = null,
+  clearMetadata = true
 }) {
   try {
-    await deleteTranscriptThreadSafely({
-      thread,
-      threadId:
-        metadata.transcriptThreadId,
-      transcriptChannel
-    });
+    const targetLogMessage =
+      await resolveTranscriptLogSafely({
+        logMessage,
+        logMessageId:
+          metadata.transcriptLogMessageId,
+        transcriptChannel
+      });
 
-    await deleteTranscriptLogSafely({
-      logMessage,
-      logMessageId:
-        metadata.transcriptLogMessageId,
-      transcriptChannel
-    });
+    const targetThread =
+      await resolveTranscriptThreadSafely({
+        thread,
+        threadId:
+          metadata.transcriptThreadId,
+        logMessage:
+          targetLogMessage,
+        transcriptChannel
+      });
 
-    await updateTicketTranscriptMetadata(
-      ticketChannel,
-      {},
-      "Cleared incomplete transcript metadata"
-    );
+    if (targetThread) {
+      await targetThread.delete(
+        "Incomplete ticket transcript cleanup"
+      );
+    }
+
+    if (targetLogMessage) {
+      await targetLogMessage.delete();
+    }
+
+    if (clearMetadata) {
+      await updateTicketTranscriptMetadata(
+        ticketChannel,
+        {},
+        "Cleared incomplete transcript metadata"
+      );
+    }
 
     console.log(
       `Incomplete transcript state cleaned for ticket ${ticketChannel.id}.`
@@ -3455,7 +3497,9 @@ async function handleTicketCloseConfirm(
         await cleanupIncompleteTranscript({
           ticketChannel,
           metadata,
-          transcriptChannel
+          transcriptChannel,
+          clearMetadata:
+            false
         });
 
       if (!recovered) {
@@ -3466,10 +3510,6 @@ async function handleTicketCloseConfirm(
         });
       }
 
-      metadata =
-        validateTicketChannel(
-          ticketChannel
-        );
     }
 
     updateOperation(
@@ -3516,11 +3556,8 @@ async function handleTicketCloseConfirm(
     let transcriptThread =
       null;
 
-    await updateTicketTranscriptMetadata(
-      ticketChannel,
-      transcriptState,
-      "Ticket transcript creation started"
-    );
+    let transcriptMetadataUpdateCount =
+      0;
 
     try {
       updateOperation(
@@ -3554,13 +3591,24 @@ async function handleTicketCloseConfirm(
           ]
         });
 
+      console.log(
+        `[Ticket ${ticketChannel.id}] transcript log created`
+      );
+
       transcriptState.logMessageId =
         logMessage.id;
+
+      transcriptMetadataUpdateCount +=
+        1;
 
       await updateTicketTranscriptMetadata(
         ticketChannel,
         transcriptState,
         "Ticket transcript log created"
+      );
+
+      console.log(
+        `[Ticket ${ticketChannel.id}] creating metadata saved`
       );
 
       transcriptThread =
@@ -3571,17 +3619,19 @@ async function handleTicketCloseConfirm(
             transcriptMessages,
           closedAt,
           onThreadCreated:
-            async thread => {
+            thread => {
               transcriptState.threadId =
                 thread.id;
 
-              await updateTicketTranscriptMetadata(
-                ticketChannel,
-                transcriptState,
-                "Ticket transcript thread created"
+              console.log(
+                `[Ticket ${ticketChannel.id}] transcript thread created`
               );
             }
         });
+
+      console.log(
+        `[Ticket ${ticketChannel.id}] transcript messages copied`
+      );
 
       ensureShutdownDeadlineNotReached();
 
@@ -3612,7 +3662,14 @@ async function handleTicketCloseConfirm(
         ]
       });
 
+      console.log(
+        `[Ticket ${ticketChannel.id}] view transcript button added`
+      );
+
       ensureShutdownDeadlineNotReached();
+
+      transcriptMetadataUpdateCount +=
+        1;
 
       await updateTicketTranscriptMetadata(
         ticketChannel,
@@ -3624,6 +3681,10 @@ async function handleTicketCloseConfirm(
             true
         },
         "Ticket transcript completed"
+      );
+
+      console.log(
+        `[Ticket ${ticketChannel.id}] complete metadata saved`
       );
 
     } catch (transcriptError) {
@@ -3653,7 +3714,10 @@ async function handleTicketCloseConfirm(
         transcriptChannel,
         thread:
           transcriptThread,
-        logMessage
+        logMessage,
+        clearMetadata:
+          transcriptMetadataUpdateCount <
+          2
       });
 
       return await interaction.editReply({
@@ -3684,8 +3748,16 @@ async function handleTicketCloseConfirm(
     ensureShutdownDeadlineNotReached();
 
     try {
+      console.log(
+        `[Ticket ${ticketChannel.id}] ticket delete started`
+      );
+
       await ticketChannel.delete(
         `Ticket closed by ${interaction.user.tag}`
+      );
+
+      console.log(
+        `[Ticket ${ticketChannel.id}] ticket deleted`
       );
 
     } catch (deleteError) {
