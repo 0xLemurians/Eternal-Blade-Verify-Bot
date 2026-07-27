@@ -1665,9 +1665,9 @@ function createTicketOpeningPayload(
       )
       .setDescription(
         [
-          "Welcome to the Eternal Blades Collaboration Desk.",
+          "Hey! Thanks for reaching out to Eternal Blades.",
           "",
-          "Please introduce your project and explain what kind of collaboration you are proposing.",
+          "Tell us a little about your project or community and the idea you have in mind. We’re always happy to explore genuine collaborations.",
           "",
           "Our team will review your request shortly."
         ].join("\n")
@@ -1678,14 +1678,13 @@ function createTicketOpeningPayload(
       .addFields(
         {
           name:
-            "📋 Please include:",
+            "📋 Share with us:",
           value:
             [
               "• Project or community name",
               "• Official website and social links",
-              "• Community size and activity",
-              "• Your proposed collaboration",
-              "• What both communities will gain"
+              "• Your collaboration idea",
+              "• Anything you think we should know",
             ].join("\n"),
           inline:
             false
@@ -1694,7 +1693,7 @@ function createTicketOpeningPayload(
           name:
             "⚠️ Important",
           value:
-            "Fake, incomplete or unserious partnership offers may be closed without a response.",
+            "Please keep it genuine and clear. We’ll get back to you as soon as we can.",
           inline:
             false
         }
