@@ -1,6 +1,7 @@
 import {
   ChannelType,
   EmbedBuilder,
+  MessageFlags,
   PermissionsBitField
 } from "discord.js";
 
@@ -20,96 +21,32 @@ const ROLES_PANEL_MESSAGE_ID =
   process.env.ROLES_PANEL_MESSAGE_ID
     ?.trim() || "";
 
-const TEAM_ROLES_PANEL_TITLE =
-  "⚔️ ETERNAL BLADES — TEAM & SYSTEM ROLES";
-
 const COMMUNITY_ROLES_PANEL_TITLE =
   "🔥 ETERNAL BLADES — COMMUNITY ROLES";
 
-const ROLES = {
-  eternalFounder:
-    {
-      id:
-        "1506665451923443875",
-      label:
-        "@Eternal Founder"
-    },
-  communityManager:
-    {
-      id:
-        "1506668525874577489",
-      label:
-        "@Community Manager"
-    },
-  eternalBladesBots:
-    {
-      id:
-        "1527374491175485480",
-      label:
-        "@Eternal Blades Bots"
-    },
-  vulcan:
-    {
-      id:
-        "1527334377191903265",
-      label:
-        "@Vulcan"
-    },
-  eternalBlades:
-    {
-      id:
-        "1506659698529800263",
-      label:
-        "@Eternal Blades"
-    },
+const ROLE_IDS = {
   firstForged:
-    {
-      id:
-        "1531702413545963651",
-      label:
-        "@First Forged"
-    },
+    "1531702413545963651",
   chosenBlade:
-    {
-      id:
-        "1506664105459585115",
-      label:
-        "@Chosen Blade"
-    },
+    "1506664105459585115",
   swiftBlade:
-    {
-      id:
-        "1506660264584679584",
-      label:
-        "@Swift Blade"
-    },
+    "1506660264584679584",
   bladeSeeker:
-    {
-      id:
-        "1506660051564237032",
-      label:
-        "@Blade Seeker"
-    },
+    "1506660051564237032",
   rumbleRoyale:
-    {
-      id:
-        "1506656400036855868",
-      label:
-        "@Rumble Royale"
-    },
+    "1506656400036855868",
   serverBooster:
-    {
-      id:
-        "1506667566964150453",
-      label:
-        "@Server Booster"
-    }
+    "1506667566964150453"
 };
 
 
 // ==================================================
 // HELPERS
 // ==================================================
+
+function roleMention(roleId) {
+  return `<@&${roleId}>`;
+}
 
 
 async function assertRolesChannelPermissions(
@@ -177,61 +114,7 @@ async function assertRolesChannelPermissions(
 // CREATE ROLES PANEL
 // ==================================================
 
-function createRolesPanel() {
-  const teamRolesEmbed =
-    new EmbedBuilder()
-      .setTitle(
-        TEAM_ROLES_PANEL_TITLE
-      )
-      .setDescription(
-        "These roles represent the official Eternal Blades team, management and server systems."
-      )
-      .setColor(
-        "#f1c40f"
-      )
-      .addFields(
-        {
-          name:
-            `👑 ${ROLES.eternalFounder.label}`,
-          value:
-            "Founder and owner of Eternal Blades. Responsible for the project’s vision, development and final decisions.",
-          inline:
-            false
-        },
-        {
-          name:
-            `👁️ ${ROLES.communityManager.label}`,
-          value:
-            "Manages the community, announcements, partnerships, events and member support.",
-          inline:
-            false
-        },
-        {
-          name:
-            `⚔️ ${ROLES.eternalBlades.label}`,
-          value:
-            "Official core team role for trusted members representing the Eternal Blades project.",
-          inline:
-            false
-        },
-        {
-          name:
-            `🤖 ${ROLES.eternalBladesBots.label}`,
-          value:
-            "Official bots developed and operated by Eternal Blades.",
-          inline:
-            false
-        },
-        {
-          name:
-            `🛡️ ${ROLES.vulcan.label}`,
-          value:
-            "Security, verification and server protection system.",
-          inline:
-            false
-        }
-      );
-
+function createRolesPanel(client) {
   const communityRolesEmbed =
     new EmbedBuilder()
       .setTitle(
@@ -243,52 +126,56 @@ function createRolesPanel() {
       .setColor(
         "#9b59b6"
       )
+      .setThumbnail(
+        client.user.displayAvatarURL({
+          size:
+            256
+        })
+      )
       .addFields(
         {
           name:
-            `⚔️ ${ROLES.bladeSeeker.label}`,
+            "🛡️ ACCESS & ELIGIBILITY",
           value:
-            "The default community role granted to verified Eternal Blades members.",
+            [
+              `⚔️ ${roleMention(
+                ROLE_IDS.bladeSeeker
+              )}`,
+              "> The default community role granted to verified Eternal Blades members.",
+              "",
+              `⚡ ${roleMention(
+                ROLE_IDS.swiftBlade
+              )}`,
+              "> Granted to members eligible for First Come, First Served opportunities.",
+              "",
+              `🔥 ${roleMention(
+                ROLE_IDS.chosenBlade
+              )}`,
+              "> Granted to members with Guaranteed allocation or GTD eligibility."
+            ].join("\n"),
           inline:
             false
         },
         {
           name:
-            `⚡ ${ROLES.swiftBlade.label}`,
+            "🏆 RECOGNITION & SUPPORT",
           value:
-            "Granted to members eligible for First Come, First Served opportunities.",
-          inline:
-            false
-        },
-        {
-          name:
-            `🔥 ${ROLES.chosenBlade.label}`,
-          value:
-            "Granted to members with Guaranteed allocation or GTD eligibility.",
-          inline:
-            false
-        },
-        {
-          name:
-            `🏆 ${ROLES.firstForged.label}`,
-          value:
-            "A special recognition role for early supporters who joined and supported Eternal Blades from the beginning.",
-          inline:
-            false
-        },
-        {
-          name:
-            `🎮 ${ROLES.rumbleRoyale.label}`,
-          value:
-            "Granted through Rumble Royale events, competitions or community activities.",
-          inline:
-            false
-        },
-        {
-          name:
-            `💎 ${ROLES.serverBooster.label}`,
-          value:
-            "Automatically granted to members actively boosting the Eternal Blades server.",
+            [
+              `🏆 ${roleMention(
+                ROLE_IDS.firstForged
+              )}`,
+              "> A special recognition role for early supporters who joined and supported Eternal Blades from the beginning.",
+              "",
+              `🎮 ${roleMention(
+                ROLE_IDS.rumbleRoyale
+              )}`,
+              "> Granted through Rumble Royale events, competitions or community activities.",
+              "",
+              `💎 ${roleMention(
+                ROLE_IDS.serverBooster
+              )}`,
+              "> Automatically granted to members actively boosting the Eternal Blades server."
+            ].join("\n"),
           inline:
             false
         }
@@ -300,12 +187,16 @@ function createRolesPanel() {
 
   return {
     embeds: [
-      teamRolesEmbed,
       communityRolesEmbed
     ],
     components: [],
+    flags:
+      MessageFlags.SuppressNotifications,
     allowedMentions: {
-      parse: []
+      roles:
+        Object.values(
+          ROLE_IDS
+        )
     }
   };
 }
@@ -353,15 +244,12 @@ export async function setupRolesPanel(
         message.embeds.some(
           embed =>
             embed.title ===
-            TEAM_ROLES_PANEL_TITLE
-        ) &&
-        message.embeds.some(
-          embed =>
-            embed.title ===
             COMMUNITY_ROLES_PANEL_TITLE
         ),
     buildPayload:
       () =>
-        createRolesPanel()
+        createRolesPanel(
+          client
+        )
   });
 }
