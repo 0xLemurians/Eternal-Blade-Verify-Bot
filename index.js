@@ -101,6 +101,9 @@ const TICKET_CREATE_COOLDOWN_MS =
 const MAX_CONCURRENT_TICKET_CREATIONS =
   3;
 
+const MAX_CONCURRENT_TICKET_CLOSES =
+  2;
+
 const TICKET_CATEGORY_CAPACITY =
   50;
 
@@ -151,6 +154,11 @@ const ticketCategoryState =
 const ticketCreationQueue = [];
 
 let activeTicketCreations =
+  0;
+
+const ticketCloseQueue = [];
+
+let activeTicketCloses =
   0;
 
 let staffRolesReady =
@@ -841,6 +849,7 @@ function getOperationCounts() {
   let creations = 0;
   let queuedCreations = 0;
   let closes = 0;
+  let queuedCloses = 0;
 
   for (
     const operation
@@ -859,6 +868,13 @@ function getOperationCounts() {
 
     if (operation.kind === "close") {
       closes += 1;
+
+      if (
+        operation.stage ===
+        "queued-close"
+      ) {
+        queuedCloses += 1;
+      }
     }
   }
 
@@ -867,7 +883,13 @@ function getOperationCounts() {
       activeOperations.size,
     creations,
     queuedCreations,
-    closes
+    closes,
+    queuedCloses,
+    activeCloses:
+      Math.max(
+        0,
+        closes - queuedCloses
+      )
   };
 }
 
@@ -1047,6 +1069,106 @@ function acquireTicketCreationSlot({
 function cancelQueuedTicketCreations() {
   const queuedItems =
     ticketCreationQueue.splice(
+      0
+    );
+
+  for (const queued of queuedItems) {
+    queued.reject(
+      new ShutdownInProgressError()
+    );
+  }
+}
+
+
+// ==================================================
+// GLOBAL CLOSE AND TRANSCRIPT SEMAPHORE
+// ==================================================
+
+function makeTicketCloseSlotRelease() {
+  let released =
+    false;
+
+  return () => {
+    if (released) {
+      return;
+    }
+
+    released =
+      true;
+
+    activeTicketCloses =
+      Math.max(
+        0,
+        activeTicketCloses - 1
+      );
+
+    drainTicketCloseQueue();
+  };
+}
+
+
+function drainTicketCloseQueue() {
+  if (isShuttingDown) {
+    cancelQueuedTicketClosures();
+    return;
+  }
+
+  while (
+    activeTicketCloses <
+      MAX_CONCURRENT_TICKET_CLOSES &&
+    ticketCloseQueue.length > 0
+  ) {
+    const queued =
+      ticketCloseQueue.shift();
+
+    activeTicketCloses +=
+      1;
+
+    queued.resolve(
+      makeTicketCloseSlotRelease()
+    );
+  }
+}
+
+
+function acquireTicketCloseSlot({
+  ticketChannelId,
+  userId
+}) {
+  if (isShuttingDown) {
+    return Promise.reject(
+      new ShutdownInProgressError()
+    );
+  }
+
+  if (
+    activeTicketCloses <
+    MAX_CONCURRENT_TICKET_CLOSES
+  ) {
+    activeTicketCloses +=
+      1;
+
+    return Promise.resolve(
+      makeTicketCloseSlotRelease()
+    );
+  }
+
+  return new Promise(
+    (resolve, reject) => {
+      ticketCloseQueue.push({
+        resolve,
+        reject,
+        ticketChannelId,
+        userId
+      });
+    }
+  );
+}
+
+
+function cancelQueuedTicketClosures() {
+  const queuedItems =
+    ticketCloseQueue.splice(
       0
     );
 
@@ -3389,6 +3511,9 @@ async function handleTicketCloseConfirm(
   let ticketChannelId =
     null;
 
+  let releaseTicketCloseSlot =
+    null;
+
   try {
     const pending =
       parsed
@@ -3497,6 +3622,25 @@ async function handleTicketCloseConfirm(
     closingTickets.add(
       ticketChannelId
     );
+
+    updateOperation(
+      operationToken,
+      {
+        stage:
+          "queued-close"
+      }
+    );
+
+    releaseTicketCloseSlot =
+      await acquireTicketCloseSlot({
+        ticketChannelId,
+        userId:
+          interaction.user.id
+      });
+
+    if (isShuttingDown) {
+      throw new ShutdownInProgressError();
+    }
 
     updateOperation(
       operationToken,
@@ -3902,7 +4046,29 @@ async function handleTicketCloseConfirm(
       );
     }
 
+  } catch (error) {
+    if (
+      error instanceof
+      ShutdownInProgressError
+    ) {
+      await interaction.editReply({
+        content:
+          "⏳ The bot is restarting, so this ticket could not be closed yet. Please try again in a moment.",
+        components: []
+      }).catch(
+        () => {}
+      );
+
+      return;
+    }
+
+    throw error;
+
   } finally {
+    if (releaseTicketCloseSlot) {
+      releaseTicketCloseSlot();
+    }
+
     if (ticketChannelId) {
       closingTickets.delete(
         ticketChannelId
@@ -4228,6 +4394,7 @@ function gracefulShutdown(
     true;
 
   cancelQueuedTicketCreations();
+  cancelQueuedTicketClosures();
 
   const initialCounts =
     getOperationCounts();
