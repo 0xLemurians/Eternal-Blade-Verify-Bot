@@ -19,6 +19,10 @@ import {
 } from "./panels/linksPanel.js";
 
 import {
+  setupRolesPanel
+} from "./panels/rolesPanel.js";
+
+import {
   upsertPanelMessage
 } from "./utils/panelMessage.js";
 
@@ -4106,6 +4110,9 @@ client.once(
     const setupResults =
       await Promise.allSettled([
         setupLinksPanel(
+          readyClient
+        ),
+        setupRolesPanel(
           readyClient
         ),
         setupTicketPanel(),
