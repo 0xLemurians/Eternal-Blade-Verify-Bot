@@ -22,7 +22,10 @@ const ROLES_PANEL_MESSAGE_ID =
     ?.trim() || "";
 
 const COMMUNITY_ROLES_PANEL_TITLE =
-  "🔥 ETERNAL BLADES — COMMUNITY ROLES";
+  "ETERNAL BLADES — COMMUNITY ROLES";
+
+const BLANK_LINE =
+  "\u200B";
 
 const ROLE_IDS = {
   firstForged:
@@ -135,22 +138,26 @@ function createRolesPanel(client) {
       .addFields(
         {
           name:
-            "🛡️ ACCESS & ELIGIBILITY",
+            "ACCESS & ELIGIBILITY",
           value:
             [
-              `⚔️ ${roleMention(
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.bladeSeeker
-              )}`,
+              ),
+              BLANK_LINE,
               "> The default community role granted to verified Eternal Blades members.",
-              "",
-              `⚡ ${roleMention(
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.swiftBlade
-              )}`,
+              ),
+              BLANK_LINE,
               "> Granted to members eligible for First Come, First Served opportunities.",
-              "",
-              `🔥 ${roleMention(
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.chosenBlade
-              )}`,
+              ),
+              BLANK_LINE,
               "> Granted to members with Guaranteed allocation or GTD eligibility."
             ].join("\n"),
           inline:
@@ -158,22 +165,26 @@ function createRolesPanel(client) {
         },
         {
           name:
-            "🏆 RECOGNITION & SUPPORT",
+            "RECOGNITION & SUPPORT",
           value:
             [
-              `🏆 ${roleMention(
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.firstForged
-              )}`,
+              ),
+              BLANK_LINE,
               "> A special recognition role for early supporters who joined and supported Eternal Blades from the beginning.",
-              "",
-              `🎮 ${roleMention(
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.rumbleRoyale
-              )}`,
+              ),
+              BLANK_LINE,
               "> Granted through Rumble Royale events, competitions or community activities.",
-              "",
-              `💎 ${roleMention(
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.serverBooster
-              )}`,
+              ),
+              BLANK_LINE,
               "> Automatically granted to members actively boosting the Eternal Blades server."
             ].join("\n"),
           inline:
