@@ -169,6 +169,8 @@ function createRolesPanel(client) {
           value:
             [
               BLANK_LINE,
+              "> These roles are granted based on eligibility and community milestones.",
+              BLANK_LINE,
               roleMention(
                 ROLE_IDS.firstForged
               ),
