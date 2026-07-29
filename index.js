@@ -1867,11 +1867,11 @@ function createTicketOpeningPayload(
       )
       .setDescription(
         [
-          "Welcome to Eternal Blades Support.",
+          "Welcome to Eternal Blades Support. Let us know how we can assist you.",
           "",
-          "Please explain your issue clearly and provide any useful details or screenshots.",
+          "Please describe your issue as clearly as possible and include any relevant details, screenshots, or files that may help us better understand your request.",
           "",
-          "A team member will assist you shortly."
+          "A member of our team will review your ticket as soon as possible."
         ].join("\n")
       )
       .setColor(
@@ -1884,27 +1884,33 @@ function createTicketOpeningPayload(
           value:
             [
               "\u200B",
-              "• A clear explanation of the problem",
+              "• A clear description of the issue",
+              "",
               "• Screenshots or relevant files",
-              "• The steps that caused the issue",
-              "• Any other useful information"
+              "",
+              "• Steps to reproduce the issue (if applicable)",
+              "",
+              "• Any additional information that may help"
             ].join("\n"),
           inline:
             false
         },
         {
           name:
-            "⏳ Response time",
+            "⏳ While you wait",
           value:
-            "\u200B\nPlease remain patient and avoid repeatedly mentioning staff members.",
+            [
+              "\u200B",
+              "• Please be patient and avoid repeatedly mentioning staff members.",
+              "",
+              "• Our team will never contact you first via direct messages. Be cautious of impersonators.",
+              "",
+              "• This ticket can only be closed by you or an authorized staff member."
+            ].join("\n"),
           inline:
             false
         }
       )
-      .setFooter({
-        text:
-          "The ticket creator or authorized staff members can close this ticket."
-      })
       .setTimestamp();
 
   const collabEmbed =
@@ -1914,11 +1920,9 @@ function createTicketOpeningPayload(
       )
       .setDescription(
         [
-          "Hey! Thanks for reaching out to Eternal Blades.",
+          "Thank you for your interest in collaborating with Eternal Blades.",
           "",
-          "Tell us a little about your project or community and the idea you have in mind. We’re always happy to explore genuine collaborations.",
-          "",
-          "Our team will review your request shortly."
+          "We'd love to learn more about your project, community, or proposal. Please share the details below so our team can review your request."
         ].join("\n")
       )
       .setColor(
@@ -1927,31 +1931,39 @@ function createTicketOpeningPayload(
       .addFields(
         {
           name:
-            "📋 Share with us:",
+            "📋 Please include:",
           value:
             [
               "\u200B",
               "• Project or community name",
-              "• Official website and social links",
-              "• Your collaboration idea",
-              "• Anything you think we should know",
+              "",
+              "• Official website and social media links",
+              "",
+              "• A brief overview of your project",
+              "",
+              "• Your collaboration proposal",
+              "",
+              "• Anything else that would help us better understand your request"
             ].join("\n"),
           inline:
             false
         },
         {
           name:
-            "⚠️ Important",
+            "⏳ Please note",
           value:
-            "\u200B\nPlease keep it genuine and clear. We’ll get back to you as soon as we can.",
+            [
+              "\u200B",
+              "• We carefully review every collaboration request and will get back to you as soon as possible.",
+              "",
+              "• Please keep your proposal clear, genuine, and concise.",
+              "",
+              "• This ticket can only be closed by you or an authorized staff member."
+            ].join("\n"),
           inline:
             false
         }
       )
-      .setFooter({
-        text:
-          "The ticket creator or authorized staff members can close this ticket."
-      })
       .setTimestamp();
 
   return {
