@@ -44,6 +44,12 @@ const STATS_REFRESH_INTERVAL_MS =
 const STATS_REFRESH_DEBOUNCE_MS =
   1500;
 
+const MAX_TRANSCRIPT_STATS_PAGES =
+  25;
+
+const TRANSCRIPT_STATS_PAGE_DELAY_MS =
+  250;
+
 const ISTANBUL_OFFSET_MS =
   3 * 60 * 60 * 1000;
 
@@ -76,6 +82,20 @@ let refreshPromise =
 
 let refreshRequested =
   false;
+
+let transcriptStatsLimitWarningActive =
+  false;
+
+
+function sleep(milliseconds) {
+  return new Promise(
+    resolve =>
+      setTimeout(
+        resolve,
+        milliseconds
+      )
+  );
+}
 
 
 function parseTicketTopic(
@@ -313,6 +333,12 @@ async function fetchRecentTranscriptRecords(
 
   let before;
 
+  let pageCount =
+    0;
+
+  let limitReached =
+    false;
+
   while (true) {
     const batch =
       await channel.messages.fetch({
@@ -328,6 +354,8 @@ async function fetchRecentTranscriptRecords(
     if (batch.size === 0) {
       break;
     }
+
+    pageCount += 1;
 
     for (const message of batch.values()) {
       if (
@@ -362,11 +390,29 @@ async function fetchRecentTranscriptRecords(
       break;
     }
 
+    if (
+      pageCount >=
+      MAX_TRANSCRIPT_STATS_PAGES
+    ) {
+      limitReached =
+        true;
+
+      break;
+    }
+
     before =
       oldestMessage.id;
+
+    await sleep(
+      TRANSCRIPT_STATS_PAGE_DELAY_MS
+    );
   }
 
-  return records;
+  return {
+    records,
+    pageCount,
+    limitReached
+  };
 }
 
 
@@ -745,27 +791,59 @@ async function collectStatsSnapshot() {
       )
     ]);
 
-  const [
-    supportClosedRecords,
-    collabClosedRecords
-  ] =
-    await Promise.all([
-      fetchRecentTranscriptRecords(
-        supportTranscriptChannel,
-        "support",
-        weekStart
-      ),
-      fetchRecentTranscriptRecords(
-        collabTranscriptChannel,
-        "collab",
-        weekStart
-      )
-    ]);
+  const supportTranscriptResult =
+    await fetchRecentTranscriptRecords(
+      supportTranscriptChannel,
+      "support",
+      weekStart
+    );
+
+  const collabTranscriptResult =
+    await fetchRecentTranscriptRecords(
+      collabTranscriptChannel,
+      "collab",
+      weekStart
+    );
+
+  const transcriptStatsLimitReached =
+    supportTranscriptResult.limitReached ||
+    collabTranscriptResult.limitReached;
+
+  if (
+    transcriptStatsLimitReached &&
+    !transcriptStatsLimitWarningActive
+  ) {
+    transcriptStatsLimitWarningActive =
+      true;
+
+    void reportError({
+      title:
+        "Ticket Stats Scan Limit Reached",
+      error:
+        new Error(
+          "The weekly transcript scan reached its safety limit."
+        ),
+      severity:
+        "warning",
+      context: {
+        supportPages:
+          supportTranscriptResult.pageCount,
+        collabPages:
+          collabTranscriptResult.pageCount,
+        maximumPagesPerChannel:
+          MAX_TRANSCRIPT_STATS_PAGES
+      }
+    });
+
+  } else if (!transcriptStatsLimitReached) {
+    transcriptStatsLimitWarningActive =
+      false;
+  }
 
   const closedRecords =
     deduplicateTranscriptRecords([
-      ...supportClosedRecords,
-      ...collabClosedRecords
+      ...supportTranscriptResult.records,
+      ...collabTranscriptResult.records
     ]);
 
   const openedToday =

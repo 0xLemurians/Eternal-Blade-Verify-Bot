@@ -19,7 +19,8 @@ const BOT_STATUS_MESSAGE_ID =
 const BOT_STATUS_PANEL_TITLES =
   new Set([
     "✅ Eternal Blades Online",
-    "⚠️ Eternal Blades Online with Setup Warnings"
+    "⚠️ Eternal Blades Online with Setup Warnings",
+    "⏳ Eternal Blades Shutting Down"
   ]);
 
 const MAX_ERROR_TEXT_LENGTH =
