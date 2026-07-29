@@ -117,6 +117,15 @@ const CLOSE_CONFIRMATION_TTL_MS =
 const SHUTDOWN_MAX_WAIT_MS =
   25_000;
 
+const LOGIN_WATCHDOG_TIMEOUT_MS =
+  15_000;
+
+const TRANSCRIPT_MESSAGE_BATCH_SIZE =
+  5;
+
+const TRANSCRIPT_BATCH_DELAY_MS =
+  1_000;
+
 const creatingTickets =
   new Set();
 
@@ -182,6 +191,12 @@ let shutdownPromise =
 
 let processExitRequested =
   false;
+
+let discordClientReady =
+  false;
+
+let loginWatchdogTimer =
+  null;
 
 
 class ShutdownInProgressError extends Error {
@@ -902,6 +917,57 @@ function ensureShutdownDeadlineNotReached() {
   if (shutdownTimedOut) {
     throw new ShutdownDeadlineError();
   }
+}
+
+
+function clearLoginWatchdog() {
+  if (!loginWatchdogTimer) {
+    return;
+  }
+
+  clearTimeout(
+    loginWatchdogTimer
+  );
+
+  loginWatchdogTimer =
+    null;
+}
+
+
+function startLoginWatchdog() {
+  clearLoginWatchdog();
+
+  loginWatchdogTimer =
+    setTimeout(
+      () => {
+        if (
+          discordClientReady ||
+          isShuttingDown ||
+          processExitRequested
+        ) {
+          return;
+        }
+
+        console.error(
+          `Discord login watchdog timed out after ${
+            LOGIN_WATCHDOG_TIMEOUT_MS / 1000
+          } seconds. Restarting the process.`
+        );
+
+        void gracefulShutdown(
+          "LOGIN_WATCHDOG_TIMEOUT",
+          {
+            exitCode:
+              1,
+            waitForOperations:
+              false
+          }
+        );
+      },
+      LOGIN_WATCHDOG_TIMEOUT_MS
+    );
+
+  loginWatchdogTimer.unref();
 }
 
 
@@ -2808,13 +2874,32 @@ async function createDiscordThreadTranscript({
     thread
   );
 
-  for (const message of messages) {
+  for (
+    const [
+      index,
+      message
+    ]
+    of messages.entries()
+  ) {
     ensureShutdownDeadlineNotReached();
 
     await copyMessageToThread(
       thread,
       message
     );
+
+    if (
+      (index + 1) %
+        TRANSCRIPT_MESSAGE_BATCH_SIZE ===
+        0 &&
+      index < messages.length - 1
+    ) {
+      await sleep(
+        TRANSCRIPT_BATCH_DELAY_MS
+      );
+
+      ensureShutdownDeadlineNotReached();
+    }
   }
 
   return thread;
@@ -4093,6 +4178,11 @@ async function handleTicketCloseConfirm(
 client.once(
   Events.ClientReady,
   async readyClient => {
+    discordClientReady =
+      true;
+
+    clearLoginWatchdog();
+
     console.log(
       `${readyClient.user.tag} online!`
     );
@@ -4307,7 +4397,7 @@ client.on(
 );
 
 
-process.once(
+process.on(
   "unhandledRejection",
   reason => {
     console.error(
@@ -4321,6 +4411,17 @@ process.once(
       error:
         reason
     });
+
+    if (
+      isShuttingDown ||
+      processExitRequested
+    ) {
+      console.warn(
+        "Unhandled promise rejection occurred while shutdown was already in progress."
+      );
+
+      return;
+    }
 
     void gracefulShutdown(
       "UNHANDLED_REJECTION",
@@ -4399,6 +4500,8 @@ function gracefulShutdown(
 
   isShuttingDown =
     true;
+
+  clearLoginWatchdog();
 
   cancelQueuedTicketCreations();
   cancelQueuedTicketClosures();
@@ -4505,7 +4608,7 @@ process.once(
 );
 
 
-process.once(
+process.on(
   "uncaughtException",
   error => {
     console.error(
@@ -4518,6 +4621,17 @@ process.once(
         "Uncaught Exception",
       error
     });
+
+    if (
+      isShuttingDown ||
+      processExitRequested
+    ) {
+      console.warn(
+        "Uncaught exception occurred while shutdown was already in progress."
+      );
+
+      return;
+    }
 
     void gracefulShutdown(
       "UNCAUGHT_EXCEPTION",
@@ -4547,6 +4661,8 @@ if (!token) {
   requestProcessExit(1);
 }
 
+
+startLoginWatchdog();
 
 client.login(
   token
