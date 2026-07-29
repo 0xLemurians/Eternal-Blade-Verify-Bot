@@ -28,16 +28,16 @@ const BLANK_LINE =
   "\u200B";
 
 const ROLE_IDS = {
-  firstForged:
+  firstBlades:
     "1531702413545963651",
-  chosenBlade:
+  bladeWarden:
     "1506664105459585115",
-  swiftBlade:
+  bladeVanguard:
     "1506660264584679584",
   bladeSeeker:
     "1506660051564237032",
-  rumbleRoyale:
-    "1506656400036855868",
+  legendOfTheBlades:
+    "1532166665482276964",
   serverBooster:
     "1506667566964150453"
 };
@@ -146,19 +146,19 @@ function createRolesPanel(client) {
                 ROLE_IDS.bladeSeeker
               ),
               BLANK_LINE,
-              "> The default community role granted to verified Eternal Blades members.",
+              "> The first step into the Eternal Blades universe. Every warrior begins their journey as a Blade Seeker, ready to explore, contribute, and forge their own legacy.",
               BLANK_LINE,
               roleMention(
-                ROLE_IDS.swiftBlade
+                ROLE_IDS.bladeVanguard
               ),
               BLANK_LINE,
-              "> Granted to members eligible for First Come, First Served opportunities.",
+              "> Awarded to those who secured a First Come, First Served whitelist spot. Awarded to the warriors who answered the call first. Blade Vanguard honors those who stood at the forefront of the Eternal Blades journey from the very beginning.",
               BLANK_LINE,
               roleMention(
-                ROLE_IDS.chosenBlade
+                ROLE_IDS.bladeWarden
               ),
               BLANK_LINE,
-              "> Granted to members with Guaranteed allocation or GTD eligibility."
+              "> Reserved for warriors personally chosen to receive a Guaranteed Whitelist. A mark of trust, commitment, and early belief in Eternal Blades."
             ].join("\n"),
           inline:
             false
@@ -172,16 +172,16 @@ function createRolesPanel(client) {
               "> These roles are granted based on eligibility and community milestones.",
               BLANK_LINE,
               roleMention(
-                ROLE_IDS.firstForged
+                ROLE_IDS.firstBlades
               ),
               BLANK_LINE,
-              "> A special recognition role for early supporters who joined and supported Eternal Blades from the beginning.",
+              "> Awarded to the first warriors who entered the Eternal Blades universe. A symbol of those who answered the call the moment the gates opened.",
               BLANK_LINE,
               roleMention(
-                ROLE_IDS.rumbleRoyale
+                ROLE_IDS.legendOfTheBlades
               ),
               BLANK_LINE,
-              "> Granted through Rumble Royale events, competitions or community activities.",
+              "> Reserved for the rare few whose extraordinary support leaves a permanent mark on Eternal Blades. This title cannot be earned through ordinary participation. It is bestowed only upon those whose actions become part of our story. Legends are remembered forever.",
               BLANK_LINE,
               roleMention(
                 ROLE_IDS.serverBooster
