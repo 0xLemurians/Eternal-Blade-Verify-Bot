@@ -1871,7 +1871,8 @@ function createTicketOpeningPayload(
           "",
           "Please describe your issue as clearly as possible and include any relevant details, screenshots, or files that may help us better understand your request.",
           "",
-          "A member of our team will review your ticket as soon as possible."
+          "A member of our team will review your ticket as soon as possible.",
+          "\u200B"
         ].join("\n")
       )
       .setColor(
@@ -1890,7 +1891,8 @@ function createTicketOpeningPayload(
               "",
               "• Steps to reproduce the issue (if applicable)",
               "",
-              "• Any additional information that may help"
+              "• Any additional information that may help",
+              "\u200B"
             ].join("\n"),
           inline:
             false
@@ -1922,7 +1924,8 @@ function createTicketOpeningPayload(
         [
           "Thank you for your interest in collaborating with Eternal Blades.",
           "",
-          "We'd love to learn more about your project, community, or proposal. Please share the details below so our team can review your request."
+          "We'd love to learn more about your project, community, or proposal. Please share the details below so our team can review your request.",
+          "\u200B"
         ].join("\n")
       )
       .setColor(
@@ -1943,7 +1946,8 @@ function createTicketOpeningPayload(
               "",
               "• Your collaboration proposal",
               "",
-              "• Anything else that would help us better understand your request"
+              "• Anything else that would help us better understand your request",
+              "\u200B"
             ].join("\n"),
           inline:
             false
