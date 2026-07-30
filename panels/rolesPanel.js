@@ -124,7 +124,10 @@ function createRolesPanel(client) {
         COMMUNITY_ROLES_PANEL_TITLE
       )
       .setDescription(
-        "Community roles represent your status, participation and eligibility within Eternal Blades."
+        [
+          "Community roles represent your status, participation and eligibility within Eternal Blades.",
+          BLANK_LINE
+        ].join("\n")
       )
       .setColor(
         "#9b59b6"
@@ -168,7 +171,6 @@ function createRolesPanel(client) {
             BLANK_LINE,
           value:
             [
-              BLANK_LINE,
               roleMention(
                 ROLE_IDS.bladeWarden
               ),
