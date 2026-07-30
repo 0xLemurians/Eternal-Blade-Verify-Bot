@@ -149,33 +149,31 @@ function createRolesPanel(client) {
               "> The first step into the Eternal Blades universe. Every warrior begins their journey as a Blade Seeker, ready to explore, contribute, and forge their own legacy.",
               BLANK_LINE,
               roleMention(
+                ROLE_IDS.firstBlades
+              ),
+              BLANK_LINE,
+              "> Awarded to the first warriors who entered the Eternal Blades universe. A symbol of those who answered the call the moment the gates opened.",
+              BLANK_LINE,
+              roleMention(
                 ROLE_IDS.bladeVanguard
               ),
               BLANK_LINE,
-              "> Awarded to those who secured a First Come, First Served whitelist spot. Awarded to the warriors who answered the call first. Blade Vanguard honors those who stood at the forefront of the Eternal Blades journey from the very beginning.",
-              BLANK_LINE,
-              roleMention(
-                ROLE_IDS.bladeWarden
-              ),
-              BLANK_LINE,
-              "> Reserved for warriors personally chosen to receive a Guaranteed Whitelist. A mark of trust, commitment, and early belief in Eternal Blades."
+              "> Awarded to those who secured a First Come, First Served whitelist spot. Awarded to the warriors who answered the call first. Blade Vanguard honors those who stood at the forefront of the Eternal Blades journey from the very beginning."
             ].join("\n"),
           inline:
             false
         },
         {
           name:
-            "RECOGNITION & SUPPORT",
+            BLANK_LINE,
           value:
             [
               BLANK_LINE,
-              "> These roles are granted based on eligibility and community milestones.",
-              BLANK_LINE,
               roleMention(
-                ROLE_IDS.firstBlades
+                ROLE_IDS.bladeWarden
               ),
               BLANK_LINE,
-              "> Awarded to the first warriors who entered the Eternal Blades universe. A symbol of those who answered the call the moment the gates opened.",
+              "> Reserved for warriors personally chosen to receive a Guaranteed Whitelist. A mark of trust, commitment, and early belief in Eternal Blades.",
               BLANK_LINE,
               roleMention(
                 ROLE_IDS.legendOfTheBlades
