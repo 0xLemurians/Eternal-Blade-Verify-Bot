@@ -23,6 +23,10 @@ import {
 } from "./panels/rolesPanel.js";
 
 import {
+  setupCommunityRulesPanel
+} from "./panels/communityRulesPanel.js";
+
+import {
   upsertPanelMessage
 } from "./utils/panelMessage.js";
 
@@ -4219,6 +4223,9 @@ client.once(
           readyClient
         ),
         setupRolesPanel(
+          readyClient
+        ),
+        setupCommunityRulesPanel(
           readyClient
         ),
         setupTicketPanel(),
