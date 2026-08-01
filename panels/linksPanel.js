@@ -31,7 +31,7 @@ const LINKS_CHANNEL_ID =
 */
 
 const WEBSITE_URL =
-  "";
+  "https://eternalbladesworld.com";
 
 const TWITTER_URL =
   "https://x.com/EternalBladesW";
