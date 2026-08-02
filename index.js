@@ -42,6 +42,11 @@ import {
   stopTicketStats
 } from "./services/ticketStats.js";
 
+import {
+  setupAutoReactions,
+  stopAutoReactions
+} from "./services/autoReactions.js";
+
 
 // ==================================================
 // DISCORD CLIENT
@@ -4231,6 +4236,9 @@ client.once(
         setupTicketPanel(),
         setupTicketStats(
           readyClient
+        ),
+        setupAutoReactions(
+          readyClient
         )
       ]);
 
@@ -4559,6 +4567,7 @@ function gracefulShutdown(
 
       try {
         stopTicketStats();
+        stopAutoReactions();
 
         const shutdownReportPromise =
           updateBotStatus({
