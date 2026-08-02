@@ -9,6 +9,9 @@ import {
 } from "./errorReporter.js";
 
 
+const GENERAL_GREETING_CHANNEL_ID =
+  "1506654040895914036";
+
 const AUTO_REACTION_CHANNELS =
   new Map([
     [
@@ -18,6 +21,10 @@ const AUTO_REACTION_CHANNELS =
     [
       "1506654401304199272",
       "raid-proofs"
+    ],
+    [
+      GENERAL_GREETING_CHANNEL_ID,
+      "general"
     ]
   ]);
 
@@ -26,6 +33,9 @@ const AUTO_REACTION_EMOJI =
 
 const LINK_PATTERN =
   /(?:https?:\/\/|www\.)[^\s<>]+/i;
+
+const GREETING_PATTERN =
+  /^(?:gm+|gn+)(?:\s+(?:gm+|gn+))*$/i;
 
 const ERROR_REPORT_COOLDOWN_MS =
   5 * 60_000;
@@ -46,6 +56,31 @@ let messageCreateListener =
 function hasLink(content) {
   return LINK_PATTERN.test(
     String(content || "")
+  );
+}
+
+
+function hasGreeting(content) {
+  return GREETING_PATTERN.test(
+    String(content || "").trim()
+  );
+}
+
+
+function shouldReactToMessage(
+  message
+) {
+  if (
+    message.channelId ===
+      GENERAL_GREETING_CHANNEL_ID
+  ) {
+    return hasGreeting(
+      message.content
+    );
+  }
+
+  return hasLink(
+    message.content
   );
 }
 
@@ -161,8 +196,8 @@ async function handleAutoReactionMessage(
     ) ||
     message.author.bot ||
     message.webhookId ||
-    !hasLink(
-      message.content
+    !shouldReactToMessage(
+      message
     )
   ) {
     return;
@@ -190,7 +225,7 @@ async function handleAutoReactionMessage(
     ) {
       void reportError({
         title:
-          "Automatic Link Reaction Failed",
+          "Automatic Message Reaction Failed",
         error,
         context: {
           channelId:
