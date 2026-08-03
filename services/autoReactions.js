@@ -35,7 +35,7 @@ const LINK_PATTERN =
   /(?:https?:\/\/|www\.)[^\s<>]+/i;
 
 const GREETING_PATTERN =
-  /^(?:gm+|gn+)(?:\s+(?:gm+|gn+))*$/i;
+  /\b(?:gm+|gn+)\b/i;
 
 const ERROR_REPORT_COOLDOWN_MS =
   5 * 60_000;
