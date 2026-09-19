@@ -115,8 +115,8 @@ function createWalletPanel(
           BLANK_LINE,
           "**Before submitting**",
           "• Submit only a public wallet address you control.",
-          "• One wallet is stored per Discord account.",
-          "• Submitting again updates your existing wallet.",
+          "• Each Discord account can submit a wallet only once.",
+          "• Wallet submissions are final and cannot be changed after submission. If you make a mistake, contact Eternal Blades staff.",
           "• The same wallet cannot be registered to multiple Discord accounts.",
           "• Never share your seed phrase, private key or recovery phrase. Eternal Blades will never ask for them."
         ].join("\n")
