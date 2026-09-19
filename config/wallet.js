@@ -29,7 +29,7 @@ export const WALLET_CUSTOM_IDS = {
   role, the first matching role becomes the eligibility
   snapshot stored with the submission.
 
-  Blade Seeker is intentionally NOT included.
+  First Blades and Blade Seeker are intentionally NOT included.
 */
 export const WALLET_ELIGIBLE_ROLES = [
   {
@@ -49,12 +49,6 @@ export const WALLET_ELIGIBLE_ROLES = [
       "1506660264584679584",
     name:
       "Blade Vanguard"
-  },
-  {
-    id:
-      "1531702413545963651",
-    name:
-      "First Blades"
   }
 ];
 
