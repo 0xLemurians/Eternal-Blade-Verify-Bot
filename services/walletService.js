@@ -541,7 +541,7 @@ async function handleWalletButton(
   if (!eligibilityRole) {
     await interaction.reply({
       content:
-        "❌ You are not currently eligible to submit a wallet. Eligible roles: Legend of the Blades, Blade Warden, Blade Vanguard and First Blades. Blade Seeker alone is not eligible.",
+        "❌ You are not currently eligible to submit a wallet. Eligible roles: Legend of the Blades, Blade Warden and Blade Vanguard. First Blades and Blade Seeker are not eligible.",
       flags:
         MessageFlags.Ephemeral
     });
@@ -633,7 +633,7 @@ async function handleWalletModal(
     if (!eligibilityRole) {
       await interaction.reply({
         content:
-          "❌ Your current roles are not eligible for wallet submission. Blade Seeker alone is not eligible.",
+          "❌ Your current roles are not eligible for wallet submission. Only Legend of the Blades, Blade Warden and Blade Vanguard are eligible.",
         flags:
           MessageFlags.Ephemeral
       });
@@ -821,7 +821,7 @@ export async function setupWalletSystem(
   );
 
   console.log(
-    "Wallet collection system is ready. Blade Seeker is excluded from eligibility."
+    "Wallet collection system is ready. First Blades and Blade Seeker are excluded from eligibility."
   );
 }
 
