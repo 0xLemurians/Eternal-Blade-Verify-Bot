@@ -154,7 +154,9 @@ Keep this channel private to Eternal Founder, Community Manager and the Eternal 
 - Eligibility is rechecked when the button is pressed and again when the modal is submitted.
 - Duplicate public wallet addresses across Discord accounts are blocked.
 - Wallet log failure does not erase a successfully stored database submission; the failure is reported through the bot error reporter.
-- A 15-second per-user submission cooldown reduces log/update spam.
+- A 3-second per-user button cooldown prevents repeated modal opens.
+- Every modal submission attempt starts a 15-second cooldown, including invalid-address and duplicate-wallet attempts.
+- Only one wallet submission per user can be processed at a time, preventing concurrent database writes.
 
 ## Project Structure
 

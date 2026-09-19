@@ -1,4 +1,4 @@
-# Eternal Blades Bot — Wallet Collection v1.1.0
+# Eternal Blades Bot — Wallet Collection v1.1.1
 
 Bu sürüm Ethereum / EVM wallet toplama sistemini mevcut Eternal Blades botuna ekler.
 
@@ -84,6 +84,9 @@ Bot hiçbir zaman seed phrase, private key veya recovery phrase istemez.
 9. `wallet-logs` kanalında yeni/update kayıtlarını kontrol et.
 10. Redeploy yap ve aynı wallet kayıtlarının PostgreSQL'de kaldığını doğrula.
 11. `WALLET_PANEL_MESSAGE_ID` ayarlı deployda duplicate panel oluşmadığını doğrula.
+12. Submit Wallet butonuna peş peşe bas → 3 saniyelik button cooldown mesajı görülmeli.
+13. Hatalı wallet gönderip hemen tekrar dene → 15 saniyelik submission cooldown çalışmalı.
+14. Aynı kullanıcıdan eşzamanlı iki submission işlenmeye çalışılırsa ikinci işlem reddedilmeli.
 
 ## Değiştirilen / eklenen dosyalar
 
