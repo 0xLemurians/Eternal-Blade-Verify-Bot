@@ -38,11 +38,20 @@ const EVM_ADDRESS_REGEX =
 const EVM_ZERO_ADDRESS_REGEX =
   /^0x0{40}$/i;
 
+const WALLET_BUTTON_COOLDOWN_MS =
+  3_000;
+
 const WALLET_SUBMISSION_COOLDOWN_MS =
   15_000;
 
+const walletButtonCooldowns =
+  new Map();
+
 const walletSubmissionCooldowns =
   new Map();
+
+const activeWalletSubmissions =
+  new Set();
 
 let walletGuildId =
   null;
@@ -236,32 +245,44 @@ function isValidEvmAddress(
 
 
 function getCooldownRemainingMs(
+  cooldowns,
+  cooldownMs,
   userId
 ) {
-  const previousSubmissionAt =
-    walletSubmissionCooldowns.get(
+  const previousActionAt =
+    cooldowns.get(
       userId
     );
 
-  if (!previousSubmissionAt) {
+  if (!previousActionAt) {
     return 0;
   }
 
-  return Math.max(
-    0,
-    WALLET_SUBMISSION_COOLDOWN_MS -
-      (
-        Date.now() -
-        previousSubmissionAt
-      )
-  );
+  const remainingMs =
+    Math.max(
+      0,
+      cooldownMs -
+        (
+          Date.now() -
+          previousActionAt
+        )
+    );
+
+  if (remainingMs === 0) {
+    cooldowns.delete(
+      userId
+    );
+  }
+
+  return remainingMs;
 }
 
 
-function markWalletSubmission(
+function markCooldown(
+  cooldowns,
   userId
 ) {
-  walletSubmissionCooldowns.set(
+  cooldowns.set(
     userId,
     Date.now()
   );
@@ -481,6 +502,31 @@ async function handleWalletButton(
     return;
   }
 
+  const remainingButtonCooldownMs =
+    getCooldownRemainingMs(
+      walletButtonCooldowns,
+      WALLET_BUTTON_COOLDOWN_MS,
+      interaction.user.id
+    );
+
+  if (remainingButtonCooldownMs > 0) {
+    await interaction.reply({
+      content:
+        `⏳ Please wait ${Math.ceil(
+          remainingButtonCooldownMs / 1000
+        )} second(s) before opening the wallet form again.`,
+      flags:
+        MessageFlags.Ephemeral
+    });
+
+    return;
+  }
+
+  markCooldown(
+    walletButtonCooldowns,
+    interaction.user.id
+  );
+
   const member =
     await fetchCurrentMember(
       interaction
@@ -523,8 +569,25 @@ async function handleWalletModal(
     return;
   }
 
+  if (
+    activeWalletSubmissions.has(
+      interaction.user.id
+    )
+  ) {
+    await interaction.reply({
+      content:
+        "⏳ Your wallet submission is already being processed. Please wait for it to finish.",
+      flags:
+        MessageFlags.Ephemeral
+    });
+
+    return;
+  }
+
   const remainingCooldownMs =
     getCooldownRemainingMs(
+      walletSubmissionCooldowns,
+      WALLET_SUBMISSION_COOLDOWN_MS,
       interaction.user.id
     );
 
@@ -541,143 +604,161 @@ async function handleWalletModal(
     return;
   }
 
-  const member =
-    await fetchCurrentMember(
-      interaction
-    );
+  /*
+    Start the cooldown before role, address and database checks.
+    Invalid addresses and duplicate-wallet attempts therefore cannot
+    bypass rate limiting by failing before a successful database write.
+  */
+  markCooldown(
+    walletSubmissionCooldowns,
+    interaction.user.id
+  );
 
-  const eligibilityRole =
-    member &&
-    getEligibilityRole(
-      member
-    );
-
-  if (!eligibilityRole) {
-    await interaction.reply({
-      content:
-        "❌ Your current roles are not eligible for wallet submission. Blade Seeker alone is not eligible.",
-      flags:
-        MessageFlags.Ephemeral
-    });
-
-    return;
-  }
-
-  const walletAddress =
-    interaction.fields
-      .getTextInputValue(
-        WALLET_CUSTOM_IDS.addressInput
-      )
-      .trim();
-
-  if (
-    !isValidEvmAddress(
-      walletAddress
-    )
-  ) {
-    await interaction.reply({
-      content:
-        "❌ Invalid Ethereum / EVM wallet address. Enter a 42-character public address beginning with `0x`. Seed phrases and private keys must never be submitted.",
-      flags:
-        MessageFlags.Ephemeral
-    });
-
-    return;
-  }
-
-  await interaction.deferReply({
-    flags:
-      MessageFlags.Ephemeral
-  });
-
-  const normalizedWalletAddress =
-    normalizeWalletAddress(
-      walletAddress
-    );
-
-  const result =
-    await upsertWalletSubmission({
-      guildId:
-        interaction.guild.id,
-      userId:
-        interaction.user.id,
-      username:
-        interaction.user.username,
-      displayName:
-        member.displayName ||
-        interaction.user.globalName ||
-        interaction.user.username,
-      walletAddress,
-      normalizedWalletAddress,
-      chain:
-        WALLET_CHAIN.key,
-      eligibilityRoleId:
-        eligibilityRole.id,
-      eligibilityRoleName:
-        eligibilityRole.name
-    });
-
-  if (result.status === "duplicate") {
-    await interaction.editReply({
-      content:
-        "❌ This wallet is already registered to another Discord account. If you believe this is a mistake, contact Eternal Blades staff.",
-      components: []
-    });
-
-    return;
-  }
-
-  markWalletSubmission(
+  activeWalletSubmissions.add(
     interaction.user.id
   );
 
   try {
-    await sendWalletLog({
-      client:
-        interaction.client,
-      interaction,
-      eligibilityRole,
-      walletAddress,
-      result
+    const member =
+      await fetchCurrentMember(
+        interaction
+      );
+
+    const eligibilityRole =
+      member &&
+      getEligibilityRole(
+        member
+      );
+
+    if (!eligibilityRole) {
+      await interaction.reply({
+        content:
+          "❌ Your current roles are not eligible for wallet submission. Blade Seeker alone is not eligible.",
+        flags:
+          MessageFlags.Ephemeral
+      });
+
+      return;
+    }
+
+    const walletAddress =
+      interaction.fields
+        .getTextInputValue(
+          WALLET_CUSTOM_IDS.addressInput
+        )
+        .trim();
+
+    if (
+      !isValidEvmAddress(
+        walletAddress
+      )
+    ) {
+      await interaction.reply({
+        content:
+          "❌ Invalid Ethereum / EVM wallet address. Enter a 42-character public address beginning with `0x`. Seed phrases and private keys must never be submitted.",
+        flags:
+          MessageFlags.Ephemeral
+      });
+
+      return;
+    }
+
+    await interaction.deferReply({
+      flags:
+        MessageFlags.Ephemeral
     });
 
-  } catch (error) {
-    console.error(
-      "Wallet log send error:",
-      error
-    );
+    const normalizedWalletAddress =
+      normalizeWalletAddress(
+        walletAddress
+      );
 
-    void reportError({
-      title:
-        "Wallet Log Send Failed",
-      error,
-      context: {
-        userId:
-          interaction.user.id,
+    const result =
+      await upsertWalletSubmission({
         guildId:
           interaction.guild.id,
-        walletLogChannelId:
-          WALLET_LOGS_CHANNEL_ID
-      }
+        userId:
+          interaction.user.id,
+        username:
+          interaction.user.username,
+        displayName:
+          member.displayName ||
+          interaction.user.globalName ||
+          interaction.user.username,
+        walletAddress,
+        normalizedWalletAddress,
+        chain:
+          WALLET_CHAIN.key,
+        eligibilityRoleId:
+          eligibilityRole.id,
+        eligibilityRoleName:
+          eligibilityRole.name
+      });
+
+    if (result.status === "duplicate") {
+      await interaction.editReply({
+        content:
+          "❌ This wallet is already registered to another Discord account. If you believe this is a mistake, contact Eternal Blades staff.",
+        components: []
+      });
+
+      return;
+    }
+
+    try {
+      await sendWalletLog({
+        client:
+          interaction.client,
+        interaction,
+        eligibilityRole,
+        walletAddress,
+        result
+      });
+
+    } catch (error) {
+      console.error(
+        "Wallet log send error:",
+        error
+      );
+
+      void reportError({
+        title:
+          "Wallet Log Send Failed",
+        error,
+        context: {
+          userId:
+            interaction.user.id,
+          guildId:
+            interaction.guild.id,
+          walletLogChannelId:
+            WALLET_LOGS_CHANNEL_ID
+        }
+      });
+    }
+
+    const messages = {
+      created:
+        `✅ Wallet submitted successfully.\n\n**Wallet:** \`${walletAddress}\`\n**Eligibility:** ${eligibilityRole.name}`,
+      updated:
+        `✅ Wallet submission updated successfully.\n\n**Wallet:** \`${walletAddress}\`\n**Eligibility:** ${eligibilityRole.name}`,
+      unchanged:
+        `✅ Your wallet is already registered. Your eligibility information has been refreshed.\n\n**Wallet:** \`${walletAddress}\`\n**Eligibility:** ${eligibilityRole.name}`
+    };
+
+    await interaction.editReply({
+      content:
+        messages[result.status] ||
+        "✅ Wallet submission saved successfully.",
+      components: []
     });
+
+  } finally {
+    activeWalletSubmissions.delete(
+      interaction.user.id
+    );
   }
-
-  const messages = {
-    created:
-      `✅ Wallet submitted successfully.\n\n**Wallet:** \`${walletAddress}\`\n**Eligibility:** ${eligibilityRole.name}`,
-    updated:
-      `✅ Wallet submission updated successfully.\n\n**Wallet:** \`${walletAddress}\`\n**Eligibility:** ${eligibilityRole.name}`,
-    unchanged:
-      `✅ Your wallet is already registered. Your eligibility information has been refreshed.\n\n**Wallet:** \`${walletAddress}\`\n**Eligibility:** ${eligibilityRole.name}`
-  };
-
-  await interaction.editReply({
-    content:
-      messages[result.status] ||
-      "✅ Wallet submission saved successfully.",
-    components: []
-  });
 }
+
 
 
 export async function setupWalletSystem(
@@ -777,7 +858,9 @@ export async function handleWalletInteraction(
 
 
 export async function stopWalletSystem() {
+  walletButtonCooldowns.clear();
   walletSubmissionCooldowns.clear();
+  activeWalletSubmissions.clear();
   walletGuildId =
     null;
 
