@@ -111,7 +111,7 @@ function createWalletPanel(
           "**Eligible roles**",
           eligibleRoleNames,
           BLANK_LINE,
-          "Blade Seeker alone is not eligible for wallet submission.",
+          "First Blades and Blade Seeker are not eligible for wallet submission.",
           BLANK_LINE,
           "**Before submitting**",
           "• Submit only a public wallet address you control.",
