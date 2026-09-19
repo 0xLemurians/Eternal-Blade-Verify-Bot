@@ -1,143 +1,100 @@
-# Eternal Blades Bot — Ölçeklenebilir Panel Güncellemesi v1.0.2
+# Eternal Blades Bot — Wallet Collection v1.1.0
 
-Bu sürümde panel mesajlarını bulmak için kanalın tüm geçmişi artık indirilmez.
+Bu sürüm Ethereum / EVM wallet toplama sistemini mevcut Eternal Blades botuna ekler.
 
-## Değiştirilecek dosyalar
+## Yetkili roller
 
-- `index.js`
-- `panels/linksPanel.js`
-- `utils/panelMessage.js` (yeni dosya)
-- `package.json`
-- `package-lock.json`
+Wallet gönderebilir:
 
-Dosya yapısı şöyle olmalıdır:
+- Legend of the Blades
+- Blade Warden
+- Blade Vanguard
+- First Blades
 
-```text
-Eternal-Blade-Verify-Bot/
-├── index.js
-├── package.json
-├── package-lock.json
-├── panels/
-│   └── linksPanel.js
-└── utils/
-    └── panelMessage.js
-```
+`Blade Seeker` tek başına wallet gönderemez.
 
-## Panel sistemi nasıl çalışır?
-
-1. Railway'de panel mesaj ID'si ayarlıysa bot doğrudan o tek mesajı getirip günceller.
-2. ID henüz ayarlı değilse yalnızca son 100 mesajı tek sefer tarar.
-3. Paneli bulursa Railway loguna mesaj ID'sini yazar.
-4. Son 100 mesajda panel yok ama daha eski mesajlar varsa yeni panel göndermez; duplicate oluşmasını engeller.
-5. Ticket transcript'i kapanırken ticket kanalındaki tüm mesajları çekmeye devam eder. Bu gereklidir; panel taramasıyla aynı şey değildir.
-
-## İlk deploydan sonra eklenecek Railway variables
-
-Deploy Logs içinde şu satırları bul:
+## Kanal ID'leri
 
 ```text
-Ticket panel message ID: 123456789012345678
-Links panel message ID: 123456789012345679
+wallet-submission = 1550988251081211935
+wallet-logs       = 1550988980554694727
 ```
 
-Railway → Variables bölümüne şu iki variable'ı ekle:
+`wallet-submission` üyelerin görebildiği fakat normal mesaj yazamadığı kanal olabilir.
+`wallet-logs` yalnızca Eternal Founder, Community Manager ve Eternal Blades Bots tarafından görülmelidir.
+
+## Railway PostgreSQL
+
+Wallet kayıtları deploy/restart sonrasında kaybolmaması için PostgreSQL'de saklanır.
+Railway projesine PostgreSQL servisi ekle ve bot servisinde `DATABASE_URL` variable'ının bulunduğunu kontrol et.
 
 ```text
-TICKET_PANEL_MESSAGE_ID=logda yazan ticket panel ID
-LINKS_PANEL_MESSAGE_ID=logda yazan links panel ID
+DATABASE_URL=postgresql://...
 ```
 
-Bunlar eklendikten sonraki deploylarda log şöyle görünür:
+Bu değeri GitHub'a yazma.
+
+## İlk deploy
+
+İlk başarılı deployda loglarda şunları görmelisin:
 
 ```text
-Existing ticket panel updated directly by message ID.
-Existing links panel updated directly by message ID.
+Wallet PostgreSQL store is ready.
+New wallet panel sent.
+Wallet panel message ID: ...
+Wallet collection system is ready. Blade Seeker is excluded from eligibility.
 ```
 
-Bu aşamadan sonra panel kanallarında binlerce mesaj olsa bile bot bütün geçmişi taramaz.
-
-## Diğer Railway variables
+Sonra Railway Variables'a ekle:
 
 ```text
-TOKEN=Discord bot tokenı
-RAILWAY_DEPLOYMENT_DRAINING_SECONDS=30
+WALLET_PANEL_MESSAGE_ID=logda_yazan_mesaj_id
 ```
 
-`TOKEN` kesinlikle GitHub koduna yazılmamalıdır.
-
-## Node sürümü
-
-`package.json` artık şunu içerir:
-
-```json
-"engines": {
-  "node": ">=18.0.0"
-}
-```
-
-Railway böylece Node 18 veya daha yeni bir sürüm kullanır.
-
-## Gerekli Discord izinleri
-
-### Links kanalı
-
-- View Channel
-- Send Messages
-- Embed Links
-- Read Message History
-
-### Open-ticket panel kanalı
-
-- View Channel
-- Send Messages
-- Embed Links
-- Read Message History
-
-### Transcript kanalları
-
-- View Channel
-- Send Messages
-- Embed Links
-- Read Message History
-- Attach Files
-- Create Public Threads
-- Send Messages in Threads
-
-### Ticket kategorisi
-
-Bot rolünde `Manage Channels` izni bulunmalıdır.
-
-## Başarılı başlangıç logları
-
-İlk deployda:
+Redeploy sonrası:
 
 ```text
-Eternal Blades#1049 online!
-Staff role IDs validated successfully.
-Existing ticket panel updated from the recent-message fallback.
-Ticket panel message ID: ...
-Existing links panel updated from the recent-message fallback.
-Links panel message ID: ...
+Existing wallet panel updated directly by message ID.
 ```
 
-Panel ID variables eklendikten sonra:
+## Kullanıcı akışı
+
+1. Yetkili role sahip üye `#wallet-submission` kanalındaki **Submit Wallet** butonuna basar.
+2. Bot güncel rollerini Discord'dan tekrar kontrol eder.
+3. Modal açılır ve 42 karakterlik `0x...` Ethereum/EVM public address istenir.
+4. Bot formatı kontrol eder. Zero address reddedilir.
+5. Aynı wallet başka Discord hesabına kayıtlıysa reddedilir.
+6. Kullanıcının eski kaydı varsa yeni wallet ile güncellenir.
+7. Başarılı kayıt PostgreSQL'e yazılır.
+8. `#wallet-logs` kanalına staff log embed'i gönderilir.
+9. Kullanıcı sonucu sadece kendisinin görebildiği ephemeral mesajla görür.
+
+Bot hiçbir zaman seed phrase, private key veya recovery phrase istemez.
+
+## Test listesi
+
+1. `npm ci`
+2. `npm run check`
+3. Blade Seeker-only hesapla **Submit Wallet** dene → reddedilmeli.
+4. First Blades hesabıyla geçerli `0x...` adres gönder → kabul edilmeli.
+5. Aynı hesap farklı wallet gönder → eski kayıt update edilmeli.
+6. İkinci Discord hesabıyla aynı wallet gönder → reddedilmeli.
+7. Hatalı uzunluk veya hex dışı karakter gönder → reddedilmeli.
+8. Zero address gönder → reddedilmeli.
+9. `wallet-logs` kanalında yeni/update kayıtlarını kontrol et.
+10. Redeploy yap ve aynı wallet kayıtlarının PostgreSQL'de kaldığını doğrula.
+11. `WALLET_PANEL_MESSAGE_ID` ayarlı deployda duplicate panel oluşmadığını doğrula.
+
+## Değiştirilen / eklenen dosyalar
 
 ```text
-Eternal Blades#1049 online!
-Staff role IDs validated successfully.
-Existing ticket panel updated directly by message ID.
-Existing links panel updated directly by message ID.
+index.js
+package.json
+package-lock.json
+README.md
+KURULUM-VE-TEST.md
+config/wallet.js                 (yeni)
+panels/walletPanel.js            (yeni)
+services/walletStore.js          (yeni)
+services/walletService.js        (yeni)
 ```
-
-## Test sırası
-
-1. Normal kullanıcıyla Support ticket aç.
-2. Aynı kullanıcıyla ikinci Support ticket açmayı dene; engellenmeli.
-3. Aynı kullanıcı Collaboration ticket açabilmeli.
-4. Normal kullanıcı `CLOSE TICKET` düğmesine basınca reddedilmeli.
-5. Founder ve Community Manager rolleri ticket kapatabilmeli.
-6. Support ve Collaboration transcriptleri doğru kanallara düşmeli.
-7. `VIEW TRANSCRIPT` düğmesi doğru thread'i açmalı.
-8. Railway'e iki panel mesaj ID variable'ını ekle.
-9. Redeploy yap.
-10. Loglarda iki panelin de `directly by message ID` ile güncellendiğini doğrula.

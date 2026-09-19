@@ -1,102 +1,79 @@
 # Eternal Blades Discord Bot
 
-A custom Discord bot built for the Eternal Blades community.
+Custom Discord bot for the Eternal Blades community.
 
-## Current Features
+## Main Features
 
-### Ticket System
-
-- Professional ticket panel with a dropdown menu
-- Support tickets
-- Collaboration tickets
-- Private ticket channels
-- One active ticket per user and category
-- Duplicate-ticket protection
-- Staff-only ticket closing
-- Ticket metadata validation
-- Automatic rollback if ticket creation fails
-
-### Discord Transcript System
-
-- Saves closed tickets to dedicated transcript channels
-- Creates a public thread for each transcript
-- Copies ticket messages in chronological order
-- Re-uploads attachments when possible
-- Uses attachment links as a fallback
-- Adds a direct **VIEW TRANSCRIPT** button
-- Keeps the ticket open if transcript creation fails
-
-### Official Links Panel
-
-- Website, Twitter / X and Discord sections
-- Support channel shortcut
-- Displays **Coming Soon** when a link is not configured
-- Updates the existing panel instead of sending duplicates
-
-### Scalable Panel Updates
-
-Panel messages are updated directly by Discord message ID through Railway variables:
-
-```text
-TICKET_PANEL_MESSAGE_ID
-LINKS_PANEL_MESSAGE_ID
-```
-
-When these variables are configured, the bot does not scan the full channel history.
-
-### Reliability and Safety
-
-- Staff authorization uses Discord role IDs
-- Discord permissions are validated before important actions
-- Login and token errors are handled clearly
-- Global promise and process errors are logged
-- Graceful shutdown support for Railway deployments
-- Active ticket operations receive time to finish before shutdown
-- Independent startup handling for ticket and links panels
-
-## Verification
-
-Member CAPTCHA and verification are handled by Vulcan.
-
-The Eternal Blades custom bot currently manages:
-
-- Tickets
-- Ticket transcripts
+- Support and collaboration ticket system
+- Ticket close confirmation and transcript archive flow
 - Official links panel
+- Community roles panel
+- Community rules panel
+- Ticket statistics and bot status panels
+- Automatic reactions
+- Persistent wallet collection for eligible community roles
+- Railway-friendly graceful shutdown and bounded panel recovery
 
-## Project Structure
+## Wallet Collection
 
-```text
-Eternal-Blade-Verify-Bot/
-├── index.js
-├── package.json
-├── package-lock.json
-├── README.md
-├── panels/
-│   └── linksPanel.js
-└── utils/
-    └── panelMessage.js
-```
+The wallet system collects public Ethereum / EVM addresses through a Discord modal.
+Members do not post wallet addresses directly into the channel.
 
-## Requirements
+### Eligible roles
 
-- Node.js 18.17.0 or newer
-- A Discord bot token
-- Discord.js 14.27.0
+Wallet submission is allowed only for these role IDs:
+
+- Legend of the Blades — `1532166665482276964`
+- Blade Warden — `1506664105459585115`
+- Blade Vanguard — `1506660264584679584`
+- First Blades — `1531702413545963651`
+
+`Blade Seeker` is intentionally excluded.
+
+### Channels
+
+- `#wallet-submission` — `1550988251081211935`
+- `#wallet-logs` — `1550988980554694727`
+
+The submission channel contains one bot panel with a **Submit Wallet** button. The logs channel should remain private to authorized staff and the bot.
+
+### Wallet rules
+
+- Ethereum / EVM public addresses only: `0x` + 40 hexadecimal characters
+- Zero address is rejected
+- One wallet record per Discord account
+- Submitting again updates the existing record
+- The same wallet cannot be registered to multiple Discord accounts
+- Seed phrases, private keys and recovery phrases are never requested
+
+The bot validates address format only. It does not cryptographically prove wallet ownership.
+
+### Storage
+
+Wallet submissions are stored in PostgreSQL. The table is created automatically on startup.
+The database stores Discord user ID, username/display-name snapshot, public wallet address, chain, eligibility role snapshot, and timestamps.
 
 ## Installation
+
+Requirements:
+
+- Node.js 18.17.0 or newer
+- Discord bot token
+- PostgreSQL database for wallet collection
+
+Install dependencies:
 
 ```bash
 npm ci
 ```
 
-Run the syntax checks:
+Run syntax checks:
 
 ```bash
 npm run check
 ```
 
-Start the bot:
+Start:
 
 ```bash
 npm start
@@ -104,74 +81,101 @@ npm start
 
 ## Railway Variables
 
-Required:
+Required for the bot:
 
 ```text
 TOKEN=your_discord_bot_token
-TICKET_PANEL_MESSAGE_ID=your_ticket_panel_message_id
-LINKS_PANEL_MESSAGE_ID=your_links_panel_message_id
+DATABASE_URL=your_railway_postgresql_connection_string
 RAILWAY_DEPLOYMENT_DRAINING_SECONDS=30
 ```
 
-Never place the Discord bot token inside GitHub files.
+Panel/status message IDs should also be configured after their first successful creation:
+
+```text
+TICKET_PANEL_MESSAGE_ID=...
+LINKS_PANEL_MESSAGE_ID=...
+ROLES_PANEL_MESSAGE_ID=...
+COMMUNITY_RULES_PANEL_MESSAGE_ID=...
+TICKET_STATS_MESSAGE_ID=...
+BOT_STATUS_MESSAGE_ID=...
+WALLET_PANEL_MESSAGE_ID=...
+```
+
+Never put `TOKEN` or `DATABASE_URL` directly into GitHub source files.
+
+## Wallet Panel First Deploy
+
+1. Add Railway PostgreSQL to the same project/service environment.
+2. Make sure `DATABASE_URL` is available to the bot service.
+3. Deploy the bot.
+4. Check the Railway logs for:
+
+```text
+Wallet PostgreSQL store is ready.
+Wallet panel message ID: 123456789012345678
+Wallet collection system is ready. Blade Seeker is excluded from eligibility.
+```
+
+5. Add the printed message ID to Railway:
+
+```text
+WALLET_PANEL_MESSAGE_ID=123456789012345678
+```
+
+6. Redeploy once. Future starts should update the same panel directly instead of creating duplicates.
 
 ## Discord Permissions
 
-### Links Channel
+### `#wallet-submission`
+
+Bot needs:
 
 - View Channel
 - Send Messages
 - Embed Links
 - Read Message History
 
-### Open Ticket Channel
+Members can be denied **Send Messages** because wallet submission uses the button/modal.
+
+### `#wallet-logs`
+
+Bot needs:
 
 - View Channel
 - Send Messages
 - Embed Links
 - Read Message History
 
-### Ticket Category
+Keep this channel private to Eternal Founder, Community Manager and the Eternal Blades Bots role.
 
-- View Channel
-- Send Messages
-- Read Message History
-- Embed Links
-- Attach Files
-- Manage Channels
+## Safety Notes
 
-### Transcript Channels
+- Authorization is based on Discord role IDs, not role names.
+- Eligibility is rechecked when the button is pressed and again when the modal is submitted.
+- Duplicate public wallet addresses across Discord accounts are blocked.
+- Wallet log failure does not erase a successfully stored database submission; the failure is reported through the bot error reporter.
+- A 15-second per-user submission cooldown reduces log/update spam.
 
-- View Channel
-- Send Messages
-- Embed Links
-- Read Message History
-- Attach Files
-- Create Public Threads
-- Send Messages in Threads
-
-## Staff Roles
-
-Ticket closing is restricted to the configured staff role IDs:
-
-- Eternal Founder
-- Community Manager
-
-Role names may be changed without breaking authorization because the bot checks role IDs.
-
-## Successful Startup Logs
+## Project Structure
 
 ```text
-Eternal Blades#1049 online!
-Staff role IDs validated successfully.
-Existing ticket panel updated directly by message ID.
-Existing links panel updated directly by message ID.
+Eternal-Blade-Verify-Bot/
+├── config/
+│   └── wallet.js
+├── panels/
+│   ├── communityRulesPanel.js
+│   ├── linksPanel.js
+│   ├── rolesPanel.js
+│   └── walletPanel.js
+├── services/
+│   ├── autoReactions.js
+│   ├── errorReporter.js
+│   ├── ticketStats.js
+│   ├── walletService.js
+│   └── walletStore.js
+├── utils/
+│   └── panelMessage.js
+├── index.js
+├── package.json
+└── package-lock.json
 ```
-
-## Deployment Shutdown
-
-During a Railway redeploy, the old bot process may receive `SIGTERM`. The bot handles this signal, stops accepting new operations, waits briefly for active ticket work to finish and then closes the Discord connection safely.
-
-## Status
-
-Active development.

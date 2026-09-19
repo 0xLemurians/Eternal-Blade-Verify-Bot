@@ -47,6 +47,12 @@ import {
   stopAutoReactions
 } from "./services/autoReactions.js";
 
+import {
+  handleWalletInteraction,
+  setupWalletSystem,
+  stopWalletSystem
+} from "./services/walletService.js";
+
 
 // ==================================================
 // DISCORD CLIENT
@@ -4239,6 +4245,9 @@ client.once(
         ),
         setupAutoReactions(
           readyClient
+        ),
+        setupWalletSystem(
+          readyClient
         )
       ]);
 
@@ -4307,6 +4316,14 @@ client.on(
           );
         }
 
+        return;
+      }
+
+      if (
+        await handleWalletInteraction(
+          interaction
+        )
+      ) {
         return;
       }
 
@@ -4569,6 +4586,15 @@ function gracefulShutdown(
         stopTicketStats();
         stopAutoReactions();
 
+        const walletStopPromise =
+          stopWalletSystem().catch(
+            error =>
+              console.error(
+                "Wallet system shutdown error:",
+                error
+              )
+          );
+
         const shutdownReportPromise =
           updateBotStatus({
             title:
@@ -4586,9 +4612,12 @@ function gracefulShutdown(
         }
 
         await Promise.race([
-          shutdownReportPromise,
+          Promise.allSettled([
+            shutdownReportPromise,
+            walletStopPromise
+          ]),
           sleep(
-            1000
+            2000
           )
         ]);
 

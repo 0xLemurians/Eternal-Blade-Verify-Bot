@@ -1,15 +1,16 @@
 {
   "name": "eternalbladesbot",
-  "version": "1.0.2",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "check": "node --check index.js && node --check panels/linksPanel.js && node --check utils/panelMessage.js"
+    "check": "node --check index.js && node --check config/wallet.js && node --check panels/linksPanel.js && node --check panels/rolesPanel.js && node --check panels/communityRulesPanel.js && node --check panels/walletPanel.js && node --check services/errorReporter.js && node --check services/ticketStats.js && node --check services/autoReactions.js && node --check services/walletStore.js && node --check services/walletService.js && node --check utils/panelMessage.js"
   },
   "dependencies": {
-    "discord.js": "14.27.0"
+    "discord.js": "14.27.0",
+    "pg": "8.16.3"
   },
   "engines": {
     "node": ">=18.17.0"
